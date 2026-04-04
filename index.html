@@ -221,8 +221,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="scard"><div class="sv" id="h-games">0</div><div class="sl">総対局数</div></div>
       <div class="scard"><div class="sv" id="h-sessions">0</div><div class="sl">開催回数</div></div>
     </div>
-    <div class="card"><div class="ctitle" id="h-rank-title">📊 累計ポイントランキング</div><div id="h-rank"></div></div>
-    <div class="card"><div class="ctitle">🕐 最近のセッション</div><div id="h-recent"></div></div>
+    <div id="h-rankings"></div>
   </div>
 </div>
 <!-- 集計 -->
@@ -684,24 +683,42 @@ function buildYearBar(yBid,mBid,onYear,onMonth){
 // ══ HOME ══
 function renderHome(){
   buildYearBar('home-year-bar','home-month-bar',v=>{homeYear=v;homeMonth='all';saveUI();renderHome();},m=>{homeMonth=m;saveUI();renderHome();});
-  const ag=allGames(),as=allSessions();
-  document.getElementById('h-games').textContent=ag.length.toLocaleString();
-  document.getElementById('h-sessions').textContent=(as.length+(A.activeSession?1:0)).toLocaleString();
-  let periodLabel='累計';if(homeYear!=='all'&&homeMonth!=='all')periodLabel=`${homeYear}年${parseInt(homeMonth)}月`;else if(homeYear!=='all')periodLabel=`${homeYear}年`;
-  document.getElementById('h-rank-title').textContent=`📊 ${periodLabel}ポイントランキング`;
+  // 絞り込み後のゲーム数・セッション数
   const opts={};if(homeYear!=='all')opts.year=homeYear;if(homeMonth!=='all')opts.month=homeMonth;
+  let filtGames=allGames(),filtSess=allSessions();
+  if(homeYear!=='all'){filtGames=filtGames.filter(g=>g[0].startsWith(homeYear));filtSess=filtSess.filter(s=>s[0].startsWith(homeYear));}
+  if(homeMonth!=='all'){const p=`${homeYear}-${homeMonth}`;filtGames=filtGames.filter(g=>g[0].startsWith(p));filtSess=filtSess.filter(s=>s[0].startsWith(p));}
+  // アクティブセッションも期間内なら加算
+  let activeCnt=0;
+  if(A.activeSession){const d=A.activeSession.start;if((homeYear==='all'||d.startsWith(homeYear))&&(homeMonth==='all'||d.startsWith(`${homeYear}-${homeMonth}`))){activeCnt=1;filtGames=filtGames.concat(A.activeSession.games.map(g=>[g[0],g[1]]));}}
+  document.getElementById('h-games').textContent=filtGames.length.toLocaleString();
+  document.getElementById('h-sessions').textContent=(filtSess.length+activeCnt).toLocaleString();
   const st=computeStats(opts);
-  const ranked=Object.entries(st).filter(([,s])=>s.games>0).sort((a,b)=>b[1].totalP-a[1].totalP);
-  const rEl=document.getElementById('h-rank');
-  if(!ranked.length){rEl.innerHTML='<div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div>';return;}
-  rEl.innerHTML=ranked.slice(0,20).map(([pid,s],i)=>{const p=playerById(parseInt(pid));const bc=i===0?'rb1':i===1?'rb2':i===2?'rb3':'rbn';return`<div class="rrow"><div class="rbadge ${bc}">${i+1}</div><div style="width:8px;height:8px;border-radius:50%;background:${p.color};margin-right:4px;flex-shrink:0"></div><div class="rname">${esc(p.name)}</div><div style="text-align:right"><div class="rscore ${s.totalP>=0?'pos':'neg'}">${s.totalP>=0?'+':''}${s.totalP.toFixed(0)}P</div><div style="font-size:9px;color:var(--sub)">${s.games}局 avg${s.avgP>=0?'+':''}${s.avgP.toFixed(2)}</div></div></div>`;}).join('');
-  const rEl2=document.getElementById('h-recent');
-  const allSess=[...A.completedSessions].reverse().slice(0,8);
-  if(!allSess.length&&!A.activeSession){rEl2.innerHTML='<div class="empty" style="padding:12px"><p>セッションがありません</p></div>';return;}
+  const entries=Object.entries(st).filter(([,s])=>s.games>0);
+  const rEl=document.getElementById('h-rankings');
+  if(!entries.length){rEl.innerHTML='<div class="card"><div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div></div>';return;}
+  let periodLabel='累計';if(homeYear!=='all'&&homeMonth!=='all')periodLabel=`${homeYear}年${parseInt(homeMonth)}月`;else if(homeYear!=='all')periodLabel=`${homeYear}年`;
+  // ランキング生成ヘルパー
+  function mkRank(title,sorted,valFn){
+    const rows=sorted.slice(0,5).map(([pid,s],i)=>{const p=playerById(parseInt(pid));const bc=i===0?'rb1':i===1?'rb2':i===2?'rb3':'rbn';const{val,sub}=valFn(s);return`<div class="rrow"><div class="rbadge ${bc}">${i+1}</div><div style="width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:4px;flex-shrink:0"></div><div class="rname">${esc(p.name)}</div><div style="text-align:right"><div class="rscore">${val}</div>${sub?`<div style="font-size:9px;color:var(--sub)">${sub}</div>`:''}</div></div>`;}).join('');
+    return`<div class="card" style="margin-bottom:8px"><div class="ctitle" style="margin-bottom:6px">${title}</div>${rows}</div>`;
+  }
   let html='';
-  if(A.activeSession){const s=A.activeSession;html+=`<div class="rrow" style="padding:7px 0"><div style="width:7px;height:7px;border-radius:50%;background:var(--ac);animation:pulse 1.5s infinite;margin-right:8px"></div><div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--ac)">進行中 ${s.start.slice(5,10).replace('-','/')} ${s.start.slice(11,16)}〜</div><div style="font-size:10px;color:var(--sub)">${s.games.length}局 · ${s.players.map(pid=>playerById(pid).name).join('·')}</div></div></div>`;}
-  html+=allSess.map(s=>{const d=s.start.slice(5,10).replace('-','/');const names=s.players.slice(0,4).map(pid=>playerById(pid).name).join('·');return`<div class="rrow" style="padding:7px 0"><div style="color:var(--sub);font-size:11px;min-width:40px">${d}</div><div style="flex:1"><div style="font-size:12px">${names}</div><div style="font-size:10px;color:var(--sub)">${s.games.length}局</div></div></div>`;}).join('');
-  rEl2.innerHTML=html;
+  // 1. ポイントランキング
+  html+=mkRank(`🏆 ${periodLabel} ポイント`,entries.slice().sort((a,b)=>b[1].totalP-a[1].totalP),s=>({val:`<span class="${s.totalP>=0?'pos':'neg'}">${s.totalP>=0?'+':''}${s.totalP.toFixed(0)}P</span>`,sub:`${s.games}局`}));
+  // 2. トップ数
+  html+=mkRank(`🥇 ${periodLabel} トップ数`,entries.slice().sort((a,b)=>b[1].r1-a[1].r1),s=>({val:`${s.r1}回`,sub:`${s.games}局中`}));
+  // 3. トップ率（1着率）
+  html+=mkRank(`📈 ${periodLabel} トップ率`,entries.slice().sort((a,b)=>b[1].r1r-a[1].r1r),s=>({val:`${(s.r1r*100).toFixed(1)}%`,sub:`${s.r1}/${s.games}局`}));
+  // 4. 平均ポイント
+  html+=mkRank(`💹 ${periodLabel} 平均ポイント`,entries.slice().sort((a,b)=>b[1].avgP-a[1].avgP),s=>({val:`<span class="${s.avgP>=0?'pos':'neg'}">${s.avgP>=0?'+':''}${s.avgP.toFixed(2)}P</span>`,sub:`${s.games}局`}));
+  // 5. 平均着順（昇順）
+  html+=mkRank(`🎯 ${periodLabel} 平均着順`,entries.filter(([,s])=>s.games>=5).slice().sort((a,b)=>a[1].avgRank-b[1].avgRank),s=>({val:`${s.avgRank.toFixed(3)}`,sub:`${s.games}局`}));
+  // 6. ラス回避率（3着率が低い順）
+  html+=mkRank(`🛡 ${periodLabel} ラス回避率`,entries.slice().sort((a,b)=>a[1].r3r-b[1].r3r),s=>({val:`${((1-s.r3r)*100).toFixed(1)}%`,sub:`ラス${s.r3}回/${s.games}局`}));
+  // 7. チップ数
+  html+=mkRank(`🪙 ${periodLabel} チップ数`,entries.slice().sort((a,b)=>b[1].chips-a[1].chips),s=>({val:`${s.chips>=0?'+':''}${s.chips}c`,sub:`${s.games}局`}));
+  rEl.innerHTML=html;
 }
 
 // ══ STATS TABLE ══
@@ -1248,9 +1265,9 @@ function confirmBulkImport(){
   // チップ
   const chips={};
   for(const[name,val] of Object.entries(_bulkData.chips)){if(name in nameToId)chips[String(nameToId[name])]=val;}
-  // 参加プレイヤーID（全ゲームのユニーク）
+  // 参加プレイヤーID（実際に対局に出たIDだけ）
   const playerSet=new Set();
-  for(const name of _bulkData.playerCols)if(name in nameToId)playerSet.add(nameToId[name]);
+  for(const g of games){for(const[pid] of g[1])playerSet.add(pid);}
   const session={id:Date.now().toString(),start:startDt,end:endDt,players:[...playerSet],games,chips,note};
   A.completedSessions.push(session);
   saveApp();closeModal('m-bulk-import');
