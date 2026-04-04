@@ -1199,12 +1199,12 @@ function parseBulkImport(){
   }
   _bulkData={playerCols:playerCols.map(c=>c.name),chips,games,nameToId};
   // プレビュー生成
-  const unmapped=playerCols.map(c=>c.name).filter(n=>!nameToId[n]);
+  const unmapped=playerCols.map(c=>c.name).filter(n=>!(n in nameToId));
   let html='';
   if(unmapped.length){
     html+=`<div style="background:rgba(245,158,11,.1);border:1px solid var(--gold);border-radius:8px;padding:10px;margin-bottom:8px;font-size:12px"><b style="color:var(--gold)">⚠ 新規プレイヤーとして追加されます</b><br><span style="color:var(--tx)">${unmapped.map(n=>esc(n)).join('、')}</span></div>`;
   }
-  const existMapped=playerCols.map(c=>c.name).filter(n=>nameToId[n]);
+  const existMapped=playerCols.map(c=>c.name).filter(n=>n in nameToId);
   if(existMapped.length){
     html+=`<div style="font-size:12px;color:var(--sub);margin-bottom:6px">既存プレイヤー: <span style="color:var(--tx)">${existMapped.map(n=>esc(n)).join('、')}</span></div>`;
   }
@@ -1233,7 +1233,7 @@ function confirmBulkImport(){
   const nameToId={..._bulkData.nameToId};
   const newPlayersToAdd=[];
   for(const name of _bulkData.playerCols){
-    if(nameToId[name])continue;
+    if(name in nameToId)continue;
     const newId=Date.now()+Math.floor(Math.random()*1000)+newPlayersToAdd.length;
     const color=PCOLORS[(A.newPlayers.length+newPlayersToAdd.length)%PCOLORS.length];
     newPlayersToAdd.push({id:newId,name,color});
@@ -1247,10 +1247,10 @@ function confirmBulkImport(){
   });
   // チップ
   const chips={};
-  for(const[name,val] of Object.entries(_bulkData.chips)){if(nameToId[name])chips[String(nameToId[name])]=val;}
+  for(const[name,val] of Object.entries(_bulkData.chips)){if(name in nameToId)chips[String(nameToId[name])]=val;}
   // 参加プレイヤーID（全ゲームのユニーク）
   const playerSet=new Set();
-  for(const name of _bulkData.playerCols)if(nameToId[name])playerSet.add(nameToId[name]);
+  for(const name of _bulkData.playerCols)if(name in nameToId)playerSet.add(nameToId[name]);
   const session={id:Date.now().toString(),start:startDt,end:endDt,players:[...playerSet],games,chips,note};
   A.completedSessions.push(session);
   saveApp();closeModal('m-bulk-import');
