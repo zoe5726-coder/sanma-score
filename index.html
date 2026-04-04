@@ -230,6 +230,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <div class="period-bar" id="year-bar"></div>
   <div class="period-bar" id="month-bar" style="display:none;padding-top:4px"></div>
   <div class="px">
+    <div style="text-align:right;margin-bottom:4px"><button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button></div>
     <div class="card" style="padding:10px 0;overflow:hidden">
       <table class="tbl2" id="stats-table">
         <thead><tr>
@@ -948,7 +949,12 @@ function buildScoreTable(session,opts={}){
   });
   html+=`<tr class="total-row"><td style="text-align:center;font-size:10px">計</td>`;players.forEach(p=>{html+=`<td class="${ptTot[p.id]>=0?'pos':'neg'}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`;});
   html+=`</tr><tr class="chip-row"><td style="text-align:center">チップ</td>`;
-  players.forEach(p=>{const cv=parseInt(chips[String(p.id)])||0;const chipId=`chip-${session.id}-${p.id}`;if(showChipInput){if(isActive){html+=`<td><div style="display:flex;align-items:center;gap:2px"><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" oninput="chipInput(${p.id},this.value)" onblur="chipBlur(${p.id},this.value)"><button class="btn btn-s" style="width:auto;padding:3px 5px;font-size:12px;flex-shrink:0" onclick="toggleChipSign('${chipId}',${p.id})">±</button></div></td>`;}else{html+=`<td><div style="display:flex;align-items:center;gap:2px"><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" onchange="updateCompletedChip('${editSessId}',${p.id},this.value)"><button class="btn btn-s" style="width:auto;padding:3px 5px;font-size:12px;flex-shrink:0" onclick="toggleCompletedChipSign('${chipId}','${editSessId}',${p.id})">±</button></div></td>`;}}else{html+=`<td class="${cv>=0?'':'neg'}">${cv>=0?'+':''}${cv}</td>`;}});
+  players.forEach(p=>{const cv=parseInt(chips[String(p.id)])||0;const chipId=`chip-${session.id}-${p.id}`;if(showChipInput){if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" oninput="chipInput(${p.id},this.value)" onblur="chipBlur(${p.id},this.value)"></td>`;}else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" onchange="updateCompletedChip('${editSessId}',${p.id},this.value)"></td>`;}}else{html+=`<td class="${cv>=0?'':'neg'}">${cv>=0?'+':''}${cv}</td>`;}});
+  // ±ボタン行（入力時のみ表示）
+  if(showChipInput){
+    html+=`</tr><tr class="chip-row"><td style="text-align:center;font-size:9px;color:var(--sub)">±反転</td>`;
+    players.forEach(p=>{const chipId=`chip-${session.id}-${p.id}`;if(isActive){html+=`<td style="text-align:center;padding:2px 0"><button class="btn btn-s" style="width:auto;padding:2px 8px;font-size:11px" onclick="toggleChipSign('${chipId}',${p.id})">±</button></td>`;}else{html+=`<td style="text-align:center;padding:2px 0"><button class="btn btn-s" style="width:auto;padding:2px 8px;font-size:11px" onclick="toggleCompletedChipSign('${chipId}','${editSessId}',${p.id})">±</button></td>`;} });
+  }
   html+=`</tr><tr class="totalp-row"><td style="text-align:center;font-size:10px;font-weight:700">合計P</td>`;
   players.forEach(p=>{const pt=ptTot[p.id]||0,ch=parseInt(chips[String(p.id)])||0,tot=pt+ch;html+=`<td id="totalP-${session.id}-${p.id}" class="${tot>=0?'pos':'neg'}">${tot>=0?'+':''}${tot}</td>`;});
   html+=`</tr></tbody></table>`;return html;
@@ -1171,7 +1177,8 @@ function buildShareHTML(s){
   });
   sctT+=`<tr style="background:${SF}"><td style="padding:5px 4px;text-align:center;font-size:10px;color:${SUB}">計</td>${players.map(p=>`<td style="padding:5px 4px;text-align:center;font-size:13px;font-weight:700;color:${ptTot[p.id]>=0?GRN:RED}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`).join('')}</tr>`;
   sctT+=`</tbody></table>`;
-  return`<div style="background:${BG};padding:16px;width:360px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box">
+  const colW=Math.max(60,Math.floor(280/players.length));const imgW=Math.max(320,80+players.length*colW+32);
+  return`<div style="background:${BG};padding:16px;width:${imgW}px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box">
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
       <span style="font-size:20px">🀄</span>
       <span style="font-size:13px;font-weight:700;color:${SUB}">三人麻雀スコア</span>
@@ -1203,6 +1210,49 @@ async function shareSession(id){
       }else{
         const a=document.createElement('a');a.download='sanma-score.png';a.href=URL.createObjectURL(blob);a.click();
       }
+    },'image/png');
+  }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
+}
+async function shareStatsTable(){
+  const opts={};if(statsYear!=='all')opts.year=statsYear;if(statsMonth!=='all')opts.month=statsMonth;
+  const st=computeStats(opts);
+  let rows=Object.entries(st).filter(([,s])=>s.games>0).map(([pid,s])=>{const p=playerById(parseInt(pid));return{pid:parseInt(pid),name:p.name,color:p.color,...s};});
+  if(sortCol==='name')rows.sort((a,b)=>sortDesc?b.name.localeCompare(a.name,'ja'):a.name.localeCompare(b.name,'ja'));
+  else rows.sort((a,b)=>sortDesc?b[sortCol]-a[sortCol]:a[sortCol]-b[sortCol]);
+  if(!rows.length){toast('データがありません');return;}
+  let periodLabel='累計';if(statsYear!=='all'&&statsMonth!=='all')periodLabel=`${statsYear}年${parseInt(statsMonth)}月`;else if(statsYear!=='all')periodLabel=`${statsYear}年`;
+  const BG='#1a1a2e',SF='#16213e',TX='#e2e8f0',SUB='#94a3b8',GRN='#34d399',RED='#f87171',BD='#2d3748';
+  const thS=`background:${SF};padding:7px 6px;font-size:11px;color:${SUB};text-align:center;border-bottom:1px solid ${BD};white-space:nowrap`;
+  const tdS=(c,fw)=>`padding:6px 6px;text-align:center;font-size:12px;border-bottom:1px solid ${BD};color:${c};font-weight:${fw||'400'}`;
+  let thead=`<tr><th style="${thS};text-align:left;min-width:70px">名前</th><th style="${thS}">打</th><th style="${thS}">1着</th><th style="${thS}">2着</th><th style="${thS}">3着</th><th style="${thS}">飛</th><th style="${thS}">平均着順</th><th style="${thS}">合計P</th><th style="${thS}">平均P</th></tr>`;
+  let tbody=rows.map(r=>`<tr>
+    <td style="${tdS(r.color,'700')}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${r.color};margin-right:4px;vertical-align:middle"></span>${esc(r.name)}</td>
+    <td style="${tdS(TX)}">${r.games}</td>
+    <td style="${tdS(TX)}">${r.r1}<br><span style="font-size:9px;color:${SUB}">${(r.r1r*100).toFixed(1)}%</span></td>
+    <td style="${tdS(TX)}">${r.r2}<br><span style="font-size:9px;color:${SUB}">${(r.r2r*100).toFixed(1)}%</span></td>
+    <td style="${tdS(TX)}">${r.r3}<br><span style="font-size:9px;color:${SUB}">${(r.r3r*100).toFixed(1)}%</span></td>
+    <td style="${tdS(TX)}">${r.tobi}</td>
+    <td style="${tdS(TX)}">${r.avgRank.toFixed(3)}</td>
+    <td style="${tdS(r.totalP>=0?GRN:RED,'700')}">${r.totalP>=0?'+':''}${r.totalP.toFixed(0)}<br><span style="font-size:9px;color:${SUB}">${r.chips>=0?'+':''}${r.chips}c</span></td>
+    <td style="${tdS(r.avgP>=0?GRN:RED)}">${r.avgP>=0?'+':''}${r.avgP.toFixed(2)}</td>
+  </tr>`).join('');
+  const html=`<div style="background:${BG};padding:16px;display:inline-block;font-family:-apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:20px">🀄</span><span style="font-size:13px;font-weight:700;color:${SUB}">三人麻雀 集計</span><span style="font-size:13px;font-weight:700;color:${TX}">${periodLabel}</span></div>
+    <table style="border-collapse:collapse;white-space:nowrap"><thead>${thead}</thead><tbody>${tbody}</tbody></table>
+  </div>`;
+  toast('画像を生成中…');
+  const wrap=document.createElement('div');wrap.style.cssText='position:fixed;left:-9999px;top:0;z-index:-1';wrap.innerHTML=html;document.body.appendChild(wrap);
+  try{
+    const el=wrap.firstElementChild;
+    const canvas=await html2canvas(el,{backgroundColor:'#1a1a2e',scale:2,useCORS:true,logging:false});
+    document.body.removeChild(wrap);
+    canvas.toBlob(async(blob)=>{
+      if(!blob){toast('画像生成に失敗しました');return;}
+      const file=new File([blob],'sanma-stats.png',{type:'image/png'});
+      if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+        try{await navigator.share({files:[file],title:'三麻集計'});}
+        catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.download='sanma-stats.png';a.href=URL.createObjectURL(blob);a.click();}}
+      }else{const a=document.createElement('a');a.download='sanma-stats.png';a.href=URL.createObjectURL(blob);a.click();}
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
 }
