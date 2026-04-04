@@ -694,14 +694,18 @@ function renderHome(){
   document.getElementById('h-games').textContent=filtGames.length.toLocaleString();
   document.getElementById('h-sessions').textContent=(filtSess.length+activeCnt).toLocaleString();
   const st=computeStats(opts);
-  const entries=Object.entries(st).filter(([,s])=>s.games>0);
+  const allEntries=Object.entries(st).filter(([,s])=>s.games>0);
   const rEl=document.getElementById('h-rankings');
-  if(!entries.length){rEl.innerHTML='<div class="card"><div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div></div>';return;}
+  if(!allEntries.length){rEl.innerHTML='<div class="card"><div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div></div>';return;}
+  // 最多打数の1/3以上打った人だけランキング対象
+  const maxGames=Math.max(...allEntries.map(([,s])=>s.games));
+  const minGames=Math.ceil(maxGames/3);
+  const entries=allEntries.filter(([,s])=>s.games>=minGames);
   let periodLabel='累計';if(homeYear!=='all'&&homeMonth!=='all')periodLabel=`${homeYear}年${parseInt(homeMonth)}月`;else if(homeYear!=='all')periodLabel=`${homeYear}年`;
   // ランキング生成ヘルパー
   function mkRank(title,sorted,valFn){
     const rows=sorted.slice(0,5).map(([pid,s],i)=>{const p=playerById(parseInt(pid));const bc=i===0?'rb1':i===1?'rb2':i===2?'rb3':'rbn';const{val,sub}=valFn(s);return`<div class="rrow"><div class="rbadge ${bc}">${i+1}</div><div style="width:7px;height:7px;border-radius:50%;background:${p.color};margin-right:4px;flex-shrink:0"></div><div class="rname">${esc(p.name)}</div><div style="text-align:right"><div class="rscore">${val}</div>${sub?`<div style="font-size:9px;color:var(--sub)">${sub}</div>`:''}</div></div>`;}).join('');
-    return`<div class="card" style="margin-bottom:8px"><div class="ctitle" style="margin-bottom:6px">${title}</div>${rows}</div>`;
+    return`<div class="card" style="margin-bottom:8px"><div class="ctitle" style="margin-bottom:6px">${title}</div>${rows||'<div style="font-size:12px;color:var(--sub);padding:8px 0">対象者なし</div>'}</div>`;
   }
   let html='';
   // 1. ポイントランキング
@@ -713,7 +717,7 @@ function renderHome(){
   // 4. 平均ポイント
   html+=mkRank(`💹 ${periodLabel} 平均ポイント`,entries.slice().sort((a,b)=>b[1].avgP-a[1].avgP),s=>({val:`<span class="${s.avgP>=0?'pos':'neg'}">${s.avgP>=0?'+':''}${s.avgP.toFixed(2)}P</span>`,sub:`${s.games}局`}));
   // 5. 平均着順（昇順）
-  html+=mkRank(`🎯 ${periodLabel} 平均着順`,entries.filter(([,s])=>s.games>=5).slice().sort((a,b)=>a[1].avgRank-b[1].avgRank),s=>({val:`${s.avgRank.toFixed(3)}`,sub:`${s.games}局`}));
+  html+=mkRank(`🎯 ${periodLabel} 平均着順`,entries.slice().sort((a,b)=>a[1].avgRank-b[1].avgRank),s=>({val:`${s.avgRank.toFixed(3)}`,sub:`${s.games}局`}));
   // 6. ラス回避率（3着率が低い順）
   html+=mkRank(`🛡 ${periodLabel} ラス回避率`,entries.slice().sort((a,b)=>a[1].r3r-b[1].r3r),s=>({val:`${((1-s.r3r)*100).toFixed(1)}%`,sub:`ラス${s.r3}回/${s.games}局`}));
   // 7. チップ数
