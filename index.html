@@ -268,33 +268,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div id="t-settings" class="tab">
   <div class="px" style="margin-top:4px">
     <div class="card" id="firebase-card"></div>
-    <div class="card" id="admin-card"></div>
-    <div class="card">
-      <div class="ctitle">💾 データ管理（全対局データ）</div>
-      <p style="font-size:12px;color:var(--sub);margin-bottom:12px;line-height:1.5">全プレイヤー・全セッション・全対局をExcel形式でバックアップ・復元できます</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="btn btn-p" onclick="dlBackup()">📥 バックアップ<br><small style="font-size:10px;font-weight:400">Excelダウンロード</small></button>
-        <label class="btn btn-s" style="display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;text-align:center;line-height:1.6">📤 インポート<br><small style="font-size:10px">Excelから復元</small><input type="file" accept=".xlsx,.xls" style="display:none" onchange="importBackup(this)"></label>
-      </div>
-    </div>
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="ctitle" style="margin:0">👤 プレイヤー追加</div>
-        <button class="btn btn-p bsm" onclick="openAddPlayer()">＋ 追加</button>
-      </div>
-      <div id="set-players"></div>
-    </div>
-    <div class="card">
-      <div class="ctitle">⚙️ 点数設定</div>
-      <div class="field"><label>返し点（参考）</label><input type="number" id="set-ret" value="40000" onchange="saveSetting()"></div>
-      <div class="field"><label>ウマ設定（参考）</label>
-        <div class="umagrid">
-          <div class="uf"><label>🥇 1着</label><input type="number" id="uma1" value="15" onchange="saveSetting()"></div>
-          <div class="uf"><label>🥈 2着</label><input type="number" id="uma2" value="0" onchange="saveSetting()"></div>
-          <div class="uf"><label>🥉 3着</label><input type="number" id="uma3" value="-15" onchange="saveSetting()"></div>
-        </div>
-      </div>
-    </div>
+    <div id="admin-card"></div>
+    <div class="card" id="data-card"></div>
+    <div class="card" id="player-card"></div>
   </div>
 </div>
 </div><!-- /main -->
@@ -380,15 +356,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button class="btn btn-p" onclick="saveEditSessMeta()">保存</button>
   </div>
 </div></div>
-<div class="overlay" id="m-admin-pin"><div class="modal">
-  <div class="mtitle">🔐 管理者認証</div>
-  <p style="text-align:center;color:var(--sub);font-size:13px;margin-bottom:14px">管理者PINを入力してください</p>
-  <div class="field"><input type="password" id="admin-pin-val" maxlength="8" placeholder="••••" inputmode="numeric" style="text-align:center;font-size:20px;letter-spacing:6px" onkeydown="if(event.key==='Enter')submitAdminPin()"></div>
-  <div class="mact">
-    <button class="btn btn-s" onclick="closeModal('m-admin-pin')">キャンセル</button>
-    <button class="btn btn-p" onclick="submitAdminPin()">認証</button>
-  </div>
-</div></div>
 <div class="overlay" id="m-player"><div class="modal">
   <div class="mtitle" id="m-player-title">プレイヤーを追加</div>
   <input type="hidden" id="m-pid">
@@ -398,6 +365,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button class="btn btn-s" onclick="closeModal('m-player')">キャンセル</button>
     <button class="btn btn-p" onclick="savePlayer()">保存</button>
   </div>
+</div></div>
+<!-- ══ セッション中メンバー追加 ══ -->
+<div class="overlay" id="m-add-member"><div class="modal">
+  <div class="mtitle">参加者を追加</div>
+  <p style="font-size:12px;color:var(--sub);margin-bottom:10px;text-align:center">セッションに参加するプレイヤーを選択</p>
+  <div class="psgrid" id="add-member-grid"></div>
+  <div style="margin-top:14px"><button class="btn btn-s" onclick="closeModal('m-add-member')">閉じる</button></div>
 </div></div>
 <!-- ══ 一括セッション登録 ══ -->
 <div class="overlay" id="m-bulk-import"><div class="modal">
@@ -440,15 +414,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <script>
 // ══ FIREBASE CONFIG ══
-// ★ 以下をあなたの Firebase プロジェクトの設定に書き換えてください ★
 const FIREBASE_CONFIG = {
-    apiKey: "AIzaSyBgMiFy57txU_TeRmT-QjJNMPyBGGyLGog",
-    authDomain: "three-majang-score-manager.firebaseapp.com",
-    databaseURL: "https://three-majang-score-manager-default-rtdb.asia-southeast1.firebasedatabase.app",
-    projectId: "three-majang-score-manager",
-    storageBucket: "three-majang-score-manager.firebasestorage.app",
-    messagingSenderId: "878309282377",
-    appId: "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
+  apiKey:            "AIzaSyBgMiFy57txU_TeRmT-QjJNMPyBGGyLGog",
+  authDomain:        "three-majang-score-manager.firebaseapp.com",
+  databaseURL:       "https://three-majang-score-manager-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId:         "three-majang-score-manager",
+  storageBucket:     "three-majang-score-manager.firebasestorage.app",
+  messagingSenderId: "878309282377",
+  appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
 const FB_PATH = 'sanma/v2';
 
@@ -464,8 +437,8 @@ let playerYear='all',playerMonth='all',selPid=0,partnerView=0;
 let partnerSortCol0='totalP',partnerSortDesc0=true;
 let partnerSortCol1='games',partnerSortDesc1=true;
 let currentTab='home';
-let adminMode=false;
 let editingSessId=null,editingGameIdx=-1;
+function isAdmin(){return !!(currentUser&&currentUser.admin);}
 let chart1=null,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
 
 // ══ FIREBASE / AUTH STATE ══
@@ -487,6 +460,8 @@ function initAuth(){
   firebase.initializeApp(FIREBASE_CONFIG);
   fbAuth=firebase.auth();
   fbDb=firebase.database();
+  // ログイン状態をローカルに永続保存（ブラウザを閉じても維持）
+  fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
   fbAuth.onAuthStateChanged(user=>{
     if(user){checkAllowed(user);}
     else{showLoginScreen();}
@@ -797,6 +772,7 @@ function renderPlayerContent(){
     </div>
   </div>
   <div class="card"><div class="ctitle">📈 累計ポイント推移</div><div class="ch2"><canvas id="trend-chart"></canvas></div></div>
+  <div class="card"><div class="ctitle">📅 セッション別スコア</div><div id="p-sessions"></div></div>
   <div class="card"><div class="ctitle">🤝 同卓分析</div>
     <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓時の各自成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
     <div id="partner-content"></div>
@@ -806,6 +782,7 @@ function renderPlayerContent(){
     const ctx=document.getElementById('trend-chart');if(!ctx)return;
     let pts=getCumulative(pid,playerYear,playerMonth);if(pts.length>200){const step=Math.ceil(pts.length/200);pts=pts.filter((_,i)=>i%step===0||i===pts.length-1);}
     chart1=new Chart(ctx,{type:'line',data:{labels:pts.map(d=>d.date.slice(5)),datasets:[{data:pts.map(d=>d.cum),borderColor:p.color,backgroundColor:p.color+'22',fill:true,tension:.3,pointRadius:pts.length>50?0:3,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}P`}}},scales:{x:{ticks:{color:'#94a3b8',font:{size:9},maxTicksLimit:8},grid:{color:'#334155'}},y:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>(v>=0?'+':'')+v.toFixed(0)+'P'},grid:{color:'#334155'}}}}});
+    renderPlayerSessions();
     renderPartnerContent();
   },60);
 }
@@ -820,6 +797,55 @@ function setPartnerView(v){
   // チャートが再描画される前なのでスクロール位置を維持
   requestAnimationFrame(()=>window.scrollTo(0,savedY));
 }
+// ══ セッション別スコア ══
+function renderPlayerSessions(){
+  const pid=selPid;
+  const el=document.getElementById('p-sessions');
+  if(!el)return;
+  // 期間フィルター
+  const year=playerYear,month=playerMonth;
+  // 完了セッション＋アクティブセッションを対象
+  const allSess=[...A.completedSessions,...(A.activeSession?[A.activeSession]:[])];
+  const sessions=allSess.filter(s=>{
+    if(!s.players.includes(pid))return false;
+    const d=s.start.slice(0,10);
+    if(year!=='all'&&!d.startsWith(year))return false;
+    if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
+    return true;
+  }).slice().reverse(); // 新しい順
+  if(!sessions.length){el.innerHTML='<div style="font-size:12px;color:var(--sub);text-align:center;padding:8px">この期間のセッションがありません</div>';return;}
+  let html=`<table class="tbl2" style="width:100%"><thead><tr>
+    <th style="text-align:left;width:60px">日付</th>
+    <th>局数</th><th>1着</th><th>2着</th><th>3着</th>
+    <th>スコア</th><th>チップ</th><th>合計P</th>
+  </tr></thead><tbody>`;
+  for(const s of sessions){
+    const isActive=!s.end;
+    const date=s.start.slice(5,10).replace('-','/');
+    const chip=parseInt(s.chips?.[String(pid)])||0;
+    let games=0,r1=0,r2=0,r3=0,pts=0;
+    for(const g of s.games){
+      const me=g[1].find(x=>x[0]===pid);
+      if(!me)continue;
+      games++;pts+=me[1];
+      if(me[2]===1)r1++;else if(me[2]===2)r2++;else r3++;
+    }
+    if(games===0)continue;
+    const total=pts+chip;
+    html+=`<tr style="${isActive?'background:rgba(34,197,94,.06)':''}">
+      <td style="font-size:10px">${date}${isActive?'<div style="font-size:9px;color:var(--ac)">進行中</div>':''}</td>
+      <td>${games}</td>
+      <td style="color:var(--gold)">${r1}</td>
+      <td style="color:var(--slv)">${r2}</td>
+      <td style="color:var(--brz)">${r3}</td>
+      <td class="${pts>=0?'pos':'neg'}">${pts>=0?'+':''}${pts}</td>
+      <td class="${chip>=0?'pos':'neg'}">${chip>=0?'+':''}${chip}</td>
+      <td class="${total>=0?'pos':'neg'}" style="font-weight:700">${total>=0?'+':''}${total}</td>
+    </tr>`;
+  }
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+}
 function buildPartnerTable2(rows,isSelfTable,selfPid){
   // 共通ヘッダー行を生成（ソートボタン付き）
   const sc=isSelfTable?partnerSortCol1:partnerSortCol0;
@@ -829,7 +855,7 @@ function buildPartnerTable2(rows,isSelfTable,selfPid){
   return`<table class="tbl2"><thead><tr>
     ${th('name','名前')}${th('games','打')}${th('r1','1着')}${th('r2','2着')}${th('r3','3着')}${th('tobi','飛び')}${th('avgRank','平均着順')}${th('totalP','合計P')}${th('avgP','平均P')}
   </tr></thead><tbody>${rows.map(r=>{
-    const pp=playerById(r.pid||r.partId);const isSelf=selfPid!==undefined&&(r.pid||r.partId)===selfPid;
+    const _rid=('pid' in r)?r.pid:r.partId;const pp=playerById(_rid);const isSelf=selfPid!==undefined&&_rid===selfPid;
     const bgStyle=isSelf?'background:rgba(34,197,94,.08)':'';
     const r1=r.r1||0,r2=r.r2||0,r3=r.r3||0,tobi=r.tobi||0,g=r.games||1;
     return`<tr style="${bgStyle}">
@@ -851,7 +877,7 @@ function renderPartnerContent(){
   const el=document.getElementById('partner-content');if(!el)return;
   if(partnerView===0){
     const st=computeStats({...opts,focusPlayer:pid});
-    let rows=Object.entries(st).filter(([,s])=>s.games>0).map(([id,s])=>({pid:parseInt(id),name:playerById(parseInt(id)).name,...s,totalP:s.totalP,chips:s.chips}));
+    let rows=Object.entries(st).filter(([,s])=>s.games>0).map(([id,s])=>{const _p=playerById(parseInt(id));return{pid:parseInt(id),name:_p.name,color:_p.color,...s,totalP:s.totalP,chips:s.chips};});
     const sc=partnerSortCol0,sd=partnerSortDesc0;
     if(sc==='name')rows.sort((a,b)=>sd?b.name.localeCompare(a.name,'ja'):a.name.localeCompare(b.name,'ja'));
     else rows.sort((a,b)=>sd?b[sc]-a[sc]:a[sc]-b[sc]);
@@ -886,7 +912,7 @@ function buildSessionStats(sess){
 function buildScoreTable(session,opts={}){
   const players=session.players.map(pid=>playerById(pid));const games=session.games;const chips=session.chips||{};
   const editable=opts.editable||false;const editSessId=opts.editSessId||session.id;
-  const isActive=!session.end;const showEditBtns=isActive||(editable&&adminMode);const showChipInput=isActive||(editable&&adminMode);
+  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=isActive||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;}));
   const minW=Math.max(280,(showEditBtns?76:44)+players.length*62);
@@ -906,7 +932,7 @@ function buildScoreTable(session,opts={}){
   html+=`</tr></tbody></table>`;return html;
 }
 function updateChip(pid,value){if(!A.activeSession)return;const num=parseInt(value)||0;A.activeSession.chips[String(pid)]=num;saveApp();const ptTot=A.activeSession.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);const tot=ptTot+num;const cell=document.getElementById(`totalP-${A.activeSession.id}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}}
-function updateCompletedChip(sessId,pid,value){const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!adminMode)return;sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;saveApp();const ptTot=sess.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);const tot=ptTot+(parseInt(value)||0);const cell=document.getElementById(`totalP-${sessId}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}}
+function updateCompletedChip(sessId,pid,value){const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!isAdmin())return;sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;saveApp();const ptTot=sess.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);const tot=ptTot+(parseInt(value)||0);const cell=document.getElementById(`totalP-${sessId}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}}
 
 // ══ SESSION RENDER ══
 function renderSession(){const el=document.getElementById('sess-content');A.activeSession?renderActiveSession(el):renderNoSession(el);}
@@ -916,7 +942,7 @@ function renderNoSession(el){
     <div style="font-size:42px;margin-bottom:10px">🎮</div>
     <p style="color:var(--sub);font-size:13px;margin-bottom:16px">セッションを開始して対局を記録しましょう</p>
     <button class="btn btn-p" onclick="openStartSession()" style="margin-bottom:8px">セッションを開始</button>
-    <button class="btn btn-s" onclick="openBulkImport()">📋 一括セッション登録</button>
+    ${isAdmin()?`<button class="btn btn-s" onclick="openBulkImport()">📋 一括セッション登録</button>`:''}
   </div>
   ${completed.length>0?`<div class="card"><div class="ctitle">📋 過去のセッション</div>${completed.map(s=>{
     const d=s.start.slice(0,10).replace(/-/g,'/');const endD=s.end?s.end.slice(0,10):null;
@@ -935,9 +961,12 @@ function renderActiveSession(el){
   </div>
   ${s.games.length>0?`<div class="card"><div class="ctitle">📊 現在の集計</div>${buildSessionStats(s)}</div>`:''}
   <div class="card" style="padding:10px 0"><div class="score-tbl-wrap">${buildScoreTable(s)}</div></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
     <button class="btn btn-p" onclick="openAddGame()">＋ 対局追加</button>
     <button class="btn btn-s" onclick="openEndSession()">● 終了</button>
+  </div>
+  <div style="margin-bottom:10px">
+    <button class="btn btn-s" onclick="openAddMember()" style="font-size:13px">👤＋ 参加者を追加</button>
   </div>`;
 }
 
@@ -1043,11 +1072,11 @@ function openSessDetail(id){
   const s=A.completedSessions.find(x=>x.id===id);if(!s)return;
   const d=s.start.slice(0,10).replace(/-/g,'/')+' '+s.start.slice(11,16)+'〜'+(s.end?s.end.slice(11,16):'');
   document.getElementById('m-sess-detail-title').textContent=d;
-  const editOpts=adminMode?{editable:true,editSessId:id}:{};
-  document.getElementById('m-sess-detail-body').innerHTML=(adminMode?`<div class="admin-badge">🔐 管理者モード</div>`:'')+buildSessionStats(s)+`<div style="overflow-x:auto;margin:0 -4px">${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
+  const editOpts=isAdmin()?{editable:true,editSessId:id}:{};
+  document.getElementById('m-sess-detail-body').innerHTML=buildSessionStats(s)+`<div style="overflow-x:auto;margin:0 -4px">${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const resumeBtn=`<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button>`;
-  if(adminMode){actEl.innerHTML=`${resumeBtn}<button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
+  if(isAdmin()){actEl.innerHTML=`${resumeBtn}<button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
   else{actEl.innerHTML=resumeBtn;}
   document.getElementById('m-sess-detail').classList.add('on');
 }
@@ -1061,7 +1090,7 @@ function resumeSession(id){
 
 // ══ EDIT GAME ══
 function openEditGame(sessId,gameIdx){
-  const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!adminMode)return;
+  const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   editingSessId=sessId;editingGameIdx=gameIdx;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);if(!sess)return;
   const game=sess.games[gameIdx];
@@ -1085,7 +1114,7 @@ function saveEditGame(){
   saveApp();closeModal('m-edit-game');if(isActiveSess)renderSession();else openSessDetail(editingSessId);toast('対局を更新しました');
 }
 function deleteGame(sessId,gameIdx){
-  const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!adminMode)return;
+  const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   openConfirm('対局を削除','この対局を削除しますか？',()=>{
     if(isActiveSess){if(A.activeSession)A.activeSession.games.splice(gameIdx,1);saveApp();closeModal('m-confirm');renderSession();}
     else{const sess=A.completedSessions.find(x=>x.id===sessId);if(sess){sess.games.splice(gameIdx,1);saveApp();}closeModal('m-confirm');openSessDetail(sessId);}
@@ -1098,6 +1127,26 @@ function setEditRemainder(pid){
   const allPids=sess.games[editingGameIdx][1].map(([p])=>p);const others=allPids.filter(p=>p!==pid);let sum=0;
   for(const op of others){const v=document.getElementById(`egsc-${op}`)?.value;if(v===''||v===null||v===undefined){toast('他プレイヤーのポイントを入力してください');return;}sum+=parseInt(v)||0;}
   const el=document.getElementById(`egsc-${pid}`);if(el)el.value=-sum;
+}
+// ══ セッション中メンバー追加 ══
+function openAddMember(){
+  if(!A.activeSession)return;
+  const inSess=new Set(A.activeSession.players);
+  const available=sortedPlayers().filter(p=>!inSess.has(p.id));
+  if(!available.length){toast('追加できるプレイヤーがいません');return;}
+  document.getElementById('add-member-grid').innerHTML=available.map(p=>`
+    <button class="psbtn" onclick="addMemberToSession(${p.id})">
+      <div style="width:26px;height:26px;border-radius:50%;background:${p.color};margin:0 auto 3px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#000">${esc(p.name[0])}</div>
+      <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</div>
+    </button>`).join('');
+  document.getElementById('m-add-member').classList.add('on');
+}
+function addMemberToSession(pid){
+  if(!A.activeSession||A.activeSession.players.includes(pid))return;
+  A.activeSession.players.push(pid);
+  A.activeSession.chips=A.activeSession.chips||{};
+  saveApp();closeModal('m-add-member');renderSession();
+  toast(`${playerById(pid).name}を追加しました`);
 }
 // ══ 一括セッション登録 ══
 let _bulkData=null;
@@ -1209,7 +1258,7 @@ function confirmBulkImport(){
   toast(`登録完了（${games.length}局・${newPlayersToAdd.length>0?newPlayersToAdd.length+'名追加':''}）`);
   _bulkData=null;
 }
-function openEditSessMeta(id){if(!adminMode)return;const s=A.completedSessions.find(x=>x.id===id);if(!s)return;editingSessId=id;document.getElementById('edit-sess-start').value=s.start||'';document.getElementById('edit-sess-end').value=s.end||'';document.getElementById('edit-sess-note').value=s.note||'';document.getElementById('m-edit-sess-meta').classList.add('on');}
+function openEditSessMeta(id){if(!isAdmin())return;const s=A.completedSessions.find(x=>x.id===id);if(!s)return;editingSessId=id;document.getElementById('edit-sess-start').value=s.start||'';document.getElementById('edit-sess-end').value=s.end||'';document.getElementById('edit-sess-note').value=s.note||'';document.getElementById('m-edit-sess-meta').classList.add('on');}
 function saveEditSessMeta(){const sess=A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;const start=document.getElementById('edit-sess-start').value;if(!start){toast('開始日時を入力してください');return;}sess.start=start;sess.end=document.getElementById('edit-sess-end').value||'';sess.note=document.getElementById('edit-sess-note').value;saveApp();closeModal('m-edit-sess-meta');openSessDetail(editingSessId);toast('更新しました');}
 
 // ══ EXCEL BACKUP (全対局データ) ══
@@ -1273,36 +1322,52 @@ function importBackup(input){
 }
 
 
-// ══ ADMIN / PIN ══
-function openAdminPinModal(){document.getElementById('admin-pin-val').value='';document.getElementById('m-admin-pin').classList.add('on');setTimeout(()=>document.getElementById('admin-pin-val').focus(),150);}
-function submitAdminPin(){const pin=document.getElementById('admin-pin-val').value;if(pin===(A.settings.adminPin||'1234')){adminMode=true;closeModal('m-admin-pin');toast('管理者モードが有効になりました');renderSettings();}else{toast('PINが違います');document.getElementById('admin-pin-val').value='';}}
-function deactivateAdmin(){adminMode=false;toast('管理者モードを解除しました');renderSettings();}
-function changePIN(){const np=document.getElementById('new-pin-val')?.value;if(!np||np.length<4){toast('4文字以上のPINを設定してください');return;}A.settings.adminPin=np;saveApp();document.getElementById('new-pin-val').value='';toast('PINを変更しました');}
 
 // ══ SETTINGS ══
 function renderSettings(){
-  // Firebase カード
+  const admin=isAdmin();
+  // Firebase カード（全員表示）
   const fbCard=document.getElementById('firebase-card');
   if(fbCard){
-    const configured=fbConfigured();const dot=document.getElementById('sync-dot');const state=dot?dot.className.replace('sync-dot ',''):'local';
+    const dot=document.getElementById('sync-dot');const state=dot?dot.className.replace('sync-dot ',''):'local';
     const stateLabel={synced:'🟢 同期済み',syncing:'🟡 同期中',offline:'🔴 オフライン',local:'⚫ ローカル'}[state]||state;
     fbCard.innerHTML=`<div class="ctitle">☁️ Firebase 同期</div>
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div class="sync-dot ${state}" style="width:10px;height:10px"></div><span style="font-size:13px">${stateLabel}</span></div>
-      ${configured?`<p style="font-size:12px;color:var(--sub);line-height:1.6">プロジェクト: <b style="color:var(--tx)">${FIREBASE_CONFIG.projectId}</b><br>ログイン: <b style="color:var(--tx)">${currentUser?.email||'未ログイン'}</b></p>`:`<p style="font-size:12px;color:var(--sub);line-height:1.6">Firebase未設定。HTMLの<code style="color:var(--ac)">FIREBASE_CONFIG</code>を編集してください。</p>`}
-      ${(currentUser?.admin&&configured)?`<div style="margin-top:10px"><div class="ctitle">👥 アクセス許可ユーザー管理</div><div id="allowed-users-list"><div style="font-size:12px;color:var(--sub)">読み込み中...</div></div><div style="display:flex;gap:8px;margin-top:8px"><input type="email" id="add-user-email" placeholder="追加するメールアドレス" style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:13px;outline:none"><button class="btn btn-p bsm" onclick="addAllowedUser()">追加</button></div></div>`:``}`;
-    if(currentUser?.admin&&configured)loadAllowedUsers();
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div class="sync-dot ${state}" style="width:10px;height:10px"></div><span style="font-size:13px">${stateLabel}</span></div>
+      <p style="font-size:12px;color:var(--sub);line-height:1.6">ログイン: <b style="color:var(--tx)">${currentUser?.email||'未ログイン'}</b>${admin?` <span style="color:var(--ac);font-size:10px">● 管理者</span>`:''}</p>
+      ${admin?`<div style="margin-top:10px"><div class="ctitle">👥 アクセス許可ユーザー管理</div><div id="allowed-users-list"><div style="font-size:12px;color:var(--sub)">読み込み中...</div></div><div style="display:flex;gap:8px;margin-top:8px"><input type="email" id="add-user-email" placeholder="追加するメールアドレス" style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:13px;outline:none"><button class="btn btn-p bsm" onclick="addAllowedUser()">追加</button></div></div>`:''}`;
+    if(admin)loadAllowedUsers();
   }
-  // Admin カード
+  // Admin カードは削除（PINレス）
   const adminCard=document.getElementById('admin-card');
-  if(adminMode){adminCard.innerHTML=`<div class="ctitle">🔐 管理者モード</div><div class="admin-badge" style="margin-bottom:10px">● 管理者モード有効中</div><p style="font-size:12px;color:var(--sub);margin-bottom:10px">セッションの修正・削除が可能です</p><div class="field"><label>PINを変更</label><input type="password" id="new-pin-val" maxlength="8" placeholder="新しいPIN（4文字以上）" inputmode="numeric"></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><button class="btn btn-d" onclick="deactivateAdmin()">解除</button><button class="btn btn-s" onclick="changePIN()">PIN変更</button></div>`;}
-  else{adminCard.innerHTML=`<div class="ctitle">🔐 管理者モード</div><p style="font-size:12px;color:var(--sub);margin-bottom:12px;line-height:1.5">管理者モードを有効にすると、過去のセッションの修正・削除が可能になります</p><button class="btn btn-p" onclick="openAdminPinModal()">管理者認証（PIN）</button>`;}
-  const el=document.getElementById('set-players');
-  if(!A.newPlayers.length)el.innerHTML='<div class="empty" style="padding:12px"><p>追加したプレイヤーはいません</p></div>';
-  else el.innerHTML=A.newPlayers.map(p=>`<div class="plitem"><div class="avatar" style="background:${p.color}">${esc(p.name[0])}</div><div class="plname">${esc(p.name)}</div><button class="btn btn-s bsm" onclick="openEditPlayer(${p.id})" style="margin-right:5px">編集</button><button class="btn btn-s bsm" onclick="delPlayer(${p.id})" style="color:var(--red);border-color:var(--red)">削除</button></div>`).join('');
-  syncSettingsUI();
+  if(adminCard)adminCard.innerHTML='';
+  // プレイヤー管理（管理者のみ）
+  const playerCard=document.getElementById('player-card');
+  if(playerCard){
+    if(admin){
+      playerCard.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="ctitle" style="margin:0">👤 プレイヤー追加</div><button class="btn btn-p bsm" onclick="openAddPlayer()">＋ 追加</button></div><div id="set-players"></div>`;
+      const el=document.getElementById('set-players');
+      if(!A.newPlayers.length)el.innerHTML='<div class="empty" style="padding:12px"><p>追加したプレイヤーはいません</p></div>';
+      else el.innerHTML=A.newPlayers.map(p=>`<div class="plitem"><div class="avatar" style="background:${p.color}">${esc(p.name[0])}</div><div class="plname">${esc(p.name)}</div><button class="btn btn-s bsm" onclick="openEditPlayer(${p.id})" style="margin-right:5px">編集</button><button class="btn btn-s bsm" onclick="delPlayer(${p.id})" style="color:var(--red);border-color:var(--red)">削除</button></div>`).join('');
+    } else {
+      playerCard.innerHTML='';
+    }
+  }
+  // データ管理（管理者のみ）
+  const dataCard=document.getElementById('data-card');
+  if(dataCard){
+    if(admin){
+      dataCard.innerHTML=`<div class="ctitle">💾 データ管理（全対局データ）</div>
+        <p style="font-size:12px;color:var(--sub);margin-bottom:12px;line-height:1.5">全プレイヤー・全セッション・全対局をExcel形式でバックアップ・復元できます</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <button class="btn btn-p" onclick="dlBackup()">📥 バックアップ<br><small style="font-size:10px;font-weight:400">Excelダウンロード</small></button>
+          <label class="btn btn-s" style="display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;text-align:center;line-height:1.6">📤 インポート<br><small style="font-size:10px">Excelから復元</small><input type="file" accept=".xlsx,.xls" style="display:none" onchange="importBackup(this)"></label>
+        </div>`;
+    } else {
+      dataCard.innerHTML='';
+    }
+  }
 }
-function syncSettingsUI(){const vals=[A.settings.ret,A.settings.uma[0],A.settings.uma[1],A.settings.uma[2]];['set-ret','uma1','uma2','uma3'].forEach((id,i)=>{const el=document.getElementById(id);if(el)el.value=vals[i];});}
-function saveSetting(){A.settings.ret=parseInt(document.getElementById('set-ret').value)||40000;A.settings.uma=[parseInt(document.getElementById('uma1').value)||0,parseInt(document.getElementById('uma2').value)||0,parseInt(document.getElementById('uma3').value)||0];saveApp();}
+function syncSettingsUI(){}
 
 // ══ USER MANAGEMENT (管理者のみ) ══
 function loadAllowedUsers(){
