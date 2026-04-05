@@ -114,12 +114,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sess-header{background:linear-gradient(135deg,rgba(34,197,94,.15),rgba(59,130,246,.1));border:1px solid rgba(34,197,94,.3);border-radius:12px;padding:14px;margin-bottom:10px}
 .sess-status{font-size:11px;color:var(--ac);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:5px}
 .sess-dot{width:7px;height:7px;background:var(--ac);border-radius:50%;animation:pulse 1.5s infinite}
-.score-tbl-wrap{overflow-x:auto}
+.score-tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .score-tbl{border-collapse:collapse;width:100%}
-.score-tbl th{background:var(--sf2);padding:7px 6px;text-align:center;color:var(--sub);font-size:11px;font-weight:600;white-space:nowrap;border-bottom:1px solid var(--bd)}
-.score-tbl th:first-child{position:sticky;left:0;background:var(--sf2);z-index:2;min-width:44px;border-right:1px solid var(--bd)}
-.score-tbl td{padding:6px;text-align:center;border-bottom:1px solid var(--bd);font-size:12px;white-space:nowrap;min-width:58px}
+.score-tbl th{background:var(--sf2);padding:7px 6px;text-align:center;color:var(--sub);font-size:11px;font-weight:600;white-space:nowrap;border-bottom:1px solid var(--bd);position:sticky;top:var(--hdr);z-index:3}
+.score-tbl th:first-child{position:sticky;left:0;top:var(--hdr);background:var(--sf2);z-index:4;min-width:44px;border-right:1px solid var(--bd)}
+.score-tbl td{padding:4px 6px;text-align:center;border-bottom:1px solid var(--bd);font-size:12px;white-space:nowrap;min-width:58px;vertical-align:middle}
 .score-tbl td:first-child{position:sticky;left:0;background:var(--sf);z-index:1;border-right:1px solid var(--bd);font-size:10px;min-width:44px}
+.score-tbl .medal{font-size:15px;display:block;line-height:1.3}
+.score-tbl .mscore{display:block;font-size:11px;line-height:1.2}
 .score-tbl .total-row td{background:var(--sf2);font-weight:700;font-size:12px;border-top:2px solid var(--bd)}
 .score-tbl .total-row td:first-child{background:var(--sf2)}
 .score-tbl .totalp-row td{background:rgba(34,197,94,.08);font-weight:700;font-size:12px}
@@ -439,7 +441,16 @@ let partnerSortCol0='totalP',partnerSortDesc0=true;
 let partnerSortCol1='games',partnerSortDesc1=true;
 let currentTab='home';
 let editingSessId=null,editingGameIdx=-1;
-function isAdmin(){return !!(currentUser&&currentUser.admin);}
+let adminMode=false;
+function isAdmin(){return !!(currentUser&&currentUser.admin)||adminMode;}
+function verifyPin(){
+  const input=document.getElementById('pin-input');if(!input)return;
+  const entered=input.value;
+  const pin=A.settings?.adminPin||'1234';
+  if(entered===pin){adminMode=true;input.value='';renderSettings();toast('管理者モードを有効にしました');}
+  else{toast('PINが違います');input.value='';}
+}
+function revokeAdmin(){adminMode=false;renderSettings();toast('管理者モードを解除しました');}
 let chart1=null,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
 
 // ══ FIREBASE / AUTH STATE ══
@@ -647,9 +658,25 @@ function computeStats(opts={}){
   return st;
 }
 function getCumulative(pid,year,month){
-  return allGames().filter(g=>{if(year!=='all'&&!g[0].startsWith(year))return false;if(month!=='all'&&!g[0].startsWith(`${year}-${month}`))return false;return g[1].some(p=>p[0]===pid);})
-    .map(g=>{const p=g[1].find(x=>x[0]===pid);return{date:g[0],pts:p[1]};})
-    .reduce((acc,x,i)=>{acc.push({date:x.date,cum:(acc[i-1]?.cum||0)+x.pts});return acc;},[]);
+  // セッション単位でチップ込み累計を計算
+  const allSess=[...A.completedSessions,...(A.activeSession?[A.activeSession]:[])];
+  const filtered=allSess.filter(s=>{
+    const d=s.start.slice(0,10);
+    if(year!=='all'&&!d.startsWith(year))return false;
+    if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
+    return s.games.some(g=>g[1].some(x=>x[0]===pid));
+  }).sort((a,b)=>a.start.localeCompare(b.start));
+  const result=[];let cum=0;
+  for(const s of filtered){
+    const chip=parseInt((s.chips||{})[String(pid)])||0;
+    const myGames=s.games.filter(g=>g[1].some(x=>x[0]===pid));
+    myGames.forEach((g,i)=>{
+      const gp=g[1].find(x=>x[0]===pid);
+      cum+=(gp?gp[1]:0)+(i===myGames.length-1?chip:0);
+      result.push({date:s.start.slice(0,10),cum});
+    });
+  }
+  return result;
 }
 
 // ══ NAV / TAB ══
@@ -919,18 +946,22 @@ function renderPartnerContent(){
 }
 
 // ══ SESSION STATS / SCORE TABLE ══
-function buildSessionStats(sess){
+function buildSessionStats(sess,opts={}){
   if(!sess||!sess.players||!sess.games||!sess.games.length)return'';
   const players=sess.players.map(pid=>playerById(pid));const chips=sess.chips||{};const st={};
   players.forEach(p=>{st[p.id]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0};});
   sess.games.forEach(g=>{g[1].forEach(([pid,pts,rank,tobi])=>{if(st[pid]!==undefined){st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;}});});
   players.forEach(p=>{const s=st[p.id];const rk=s.r1+s.r2+s.r3;s.avgRank=rk>0?(s.r1+s.r2*2+s.r3*3)/rk:0;s.chip=parseInt(chips[String(p.id)])||0;s.total=s.pts+s.chip;});
   const metrics=[{k:'games',l:'打数',f:v=>v,c:()=>''},{k:'r1',l:'1着',f:v=>v,c:()=>''},{k:'r2',l:'2着',f:v=>v,c:()=>''},{k:'r3',l:'3着',f:v=>v,c:()=>''},{k:'tobi',l:'飛び',f:v=>v,c:()=>''},{k:'avgRank',l:'平均着順',f:v=>v.toFixed(3),c:()=>''},{k:'pts',l:'スコア合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'chip',l:'チップ合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'total',l:'総合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'}];
-  let html=`<div style="overflow-x:auto;margin:0 0 12px"><table class="sess-stat-tbl"><thead><tr><th></th>`;
+  const minW=Math.max(280,80+players.length*70);
+  let html=opts.noWrap?'':`<div style="overflow-x:auto;margin:0 0 12px">`;
+  html+=`<table class="sess-stat-tbl" style="min-width:${minW}px"><thead><tr><th></th>`;
   players.forEach(p=>{html+=`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`;});
   html+=`</tr></thead><tbody>`;
   metrics.forEach(m=>{html+=`<tr><td>${m.l}</td>`;players.forEach(p=>{const v=st[p.id][m.k];html+=`<td class="${m.c(v)}">${m.f(v)}</td>`;});html+=`</tr>`;});
-  html+=`</tbody></table></div>`;return html;
+  html+=`</tbody></table>`;
+  if(!opts.noWrap)html+=`</div>`;
+  return html;
 }
 function buildScoreTable(session,opts={}){
   const players=session.players.map(pid=>playerById(pid));const games=session.games;const chips=session.chips||{};
@@ -938,13 +969,13 @@ function buildScoreTable(session,opts={}){
   const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=isActive||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;}));
-  const minW=Math.max(280,(showEditBtns?76:44)+players.length*62);
+  const minW=Math.max(280,80+players.length*70);
   let html=`<table class="score-tbl" style="min-width:${minW}px"><thead><tr><th style="width:${showEditBtns?'72px':'44px'}">${showEditBtns?'管理':'局'}</th>${players.map(p=>`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`).join('')}</tr></thead><tbody>`;
   games.forEach((game,idx)=>{
     const time=game[0].length>10?game[0].slice(11,16):'';
     if(showEditBtns){html+=`<tr><td style="text-align:center"><div style="font-size:9px;font-weight:600;margin-bottom:3px">${idx+1}</div><div class="game-admin-btns"><button class="gab" onclick="openEditGame('${editSessId}',${idx})">✏️</button><button class="gab del" onclick="deleteGame('${editSessId}',${idx})">🗑</button></div></td>`;}
     else{html+=`<tr><td style="text-align:center"><div style="font-weight:600;font-size:10px">${idx+1}</div>${time?`<div style="font-size:9px;color:var(--sub)">${time}</div>`:''}</td>`;}
-    players.forEach(p=>{const gp=game[1].find(x=>x[0]===p.id);if(!gp){html+=`<td style="color:var(--sf2)">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';html+=`<td class="${gp[1]>=0?'pos':'neg'}">${em}${gp[1]>=0?'+':''}${gp[1]}</td>`;}});
+    players.forEach(p=>{const gp=game[1].find(x=>x[0]===p.id);if(!gp){html+=`<td style="color:var(--sf2)">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';html+=`<td class="${gp[1]>=0?'pos':'neg'}"><span class="medal">${em}</span><span class="mscore">${gp[1]>=0?'+':''}${gp[1]}</span></td>`;}});
     html+=`</tr>`;
   });
   html+=`<tr class="total-row"><td style="text-align:center;font-size:10px">計</td>`;players.forEach(p=>{html+=`<td class="${ptTot[p.id]>=0?'pos':'neg'}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`;});
@@ -1002,7 +1033,7 @@ function renderNoSession(el){
     const pNames=s.players.slice(0,4).map(pid=>esc(playerById(pid).name)).join(' · ');
     return`<div class="sess-item"><div class="sess-info"><div class="sess-date">${dateStr} ${s.start.slice(11,16)}〜${s.end?s.end.slice(11,16):''}</div><div class="sess-meta">${pNames} | ${s.games.length}局</div></div>
       <button class="btn btn-s bxsm" onclick="openSessDetail('${s.id}')">詳細</button>
-      <button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>
+      ${isAdmin()?`<button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>`:''}
     </div>`;}).join('')}</div>`:''}`;
 }
 function renderActiveSession(el){
@@ -1011,8 +1042,12 @@ function renderActiveSession(el){
     <div style="font-size:14px;font-weight:600">${startStr} 〜</div>
     <div style="font-size:11px;color:var(--sub);margin-top:3px">${players.map(p=>esc(p.name)).join(' · ')} · ${s.games.length}局</div>
   </div>
-  ${s.games.length>0?`<div class="card"><div class="ctitle">📊 現在の集計</div><div id="sess-stats-card">${buildSessionStats(s)}</div></div>`:''}
-  <div class="card" style="padding:10px 0"><div class="score-tbl-wrap">${buildScoreTable(s)}</div></div>
+  <div class="card" style="padding:10px 0">
+    <div class="score-tbl-wrap">
+      ${s.games.length>0?`<div id="sess-stats-card" style="padding:0 0 4px">${buildSessionStats(s,{noWrap:true})}</div>`:''}
+      ${buildScoreTable(s)}
+    </div>
+  </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
     <button class="btn btn-p" onclick="openAddGame()">＋ 対局追加</button>
     <button class="btn btn-s" onclick="openEndSession()">● 終了</button>
@@ -1135,12 +1170,11 @@ function openSessDetail(id){
   const d=s.start.slice(0,10).replace(/-/g,'/')+' '+s.start.slice(11,16)+'〜'+(s.end?s.end.slice(11,16):'');
   document.getElementById('m-sess-detail-title').textContent=d;
   const editOpts=isAdmin()?{editable:true,editSessId:id}:{};
-  document.getElementById('m-sess-detail-body').innerHTML=buildSessionStats(s)+`<div style="overflow-x:auto;margin:0 -4px">${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
+  document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
-  const resumeBtn=`<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button>`;
-  if(isAdmin()){actEl.innerHTML=`${shareBtn}${resumeBtn}<button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
-  else{actEl.innerHTML=`${shareBtn}${resumeBtn}`;}
+  if(isAdmin()){actEl.innerHTML=`${shareBtn}<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button><button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
+  else{actEl.innerHTML=shareBtn;}
   document.getElementById('m-sess-detail').classList.add('on');
 }
 function buildShareHTML(s){
@@ -1513,9 +1547,22 @@ function renderSettings(){
       ${admin?`<div style="margin-top:10px"><div class="ctitle">👥 アクセス許可ユーザー管理</div><div id="allowed-users-list"><div style="font-size:12px;color:var(--sub)">読み込み中...</div></div><div style="display:flex;gap:8px;margin-top:8px"><input type="email" id="add-user-email" placeholder="追加するメールアドレス" style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:13px;outline:none"><button class="btn btn-p bsm" onclick="addAllowedUser()">追加</button></div></div>`:''}`;
     if(admin)loadAllowedUsers();
   }
-  // Admin カードは削除（PINレス）
+  // PINカード（管理者権限付与）
   const adminCard=document.getElementById('admin-card');
-  if(adminCard)adminCard.innerHTML='';
+  if(adminCard){
+    if(admin||adminMode){
+      adminCard.innerHTML=`<div class="ctitle">🔑 管理者モード</div>
+        <p style="font-size:12px;color:var(--sub);margin-bottom:10px">管理者モードが有効です。再開・編集・削除が可能です。</p>
+        ${!currentUser?.admin?`<button class="btn btn-d bsm" onclick="revokeAdmin()">管理者モードを解除</button>`:''}`;
+    } else {
+      adminCard.innerHTML=`<div class="ctitle">🔑 管理者ログイン</div>
+        <p style="font-size:12px;color:var(--sub);margin-bottom:10px">PINコードを入力すると管理者モードが有効になります。</p>
+        <div style="display:flex;gap:8px">
+          <input type="password" id="pin-input" placeholder="PIN" maxlength="8" style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;color:var(--tx);font-size:16px;outline:none;letter-spacing:4px" onkeydown="if(event.key==='Enter')verifyPin()">
+          <button class="btn btn-p bsm" onclick="verifyPin()">確認</button>
+        </div>`;
+    }
+  }
   // プレイヤー管理（管理者のみ）
   const playerCard=document.getElementById('player-card');
   if(playerCard){
