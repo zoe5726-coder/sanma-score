@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <title>三麻スコア管理</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🀄</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -57,7 +56,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .pbtn{padding:5px 12px;border-radius:16px;border:1px solid var(--bd);background:var(--sf);color:var(--sub);font-size:12px;cursor:pointer;white-space:nowrap;transition:all .2s;flex-shrink:0}
 .pbtn.on{background:var(--ac);color:#000;border-color:var(--ac);font-weight:600}
 .month-sel{width:auto;background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:5px 14px;color:var(--tx);font-size:12px;cursor:pointer;outline:none;margin:6px 14px 4px}
-#month-bar .month-sel{margin:0}
 /* ── HOME ── */
 .hgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
 .scard{background:var(--sf);border-radius:12px;padding:14px;border:1px solid var(--bd);text-align:center}
@@ -234,10 +232,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <!-- 集計 -->
 <div id="t-stats" class="tab">
-  <div class="period-bar" id="year-bar"></div>
-  <div style="display:flex;align-items:center;gap:8px;padding:4px 14px 2px;min-height:36px">
-    <div id="month-bar" style="flex:1;display:none"></div>
-    <button class="btn btn-p bsm" onclick="shareStatsTable()" style="flex-shrink:0">📸 共有</button>
+  <div style="position:relative">
+    <div class="period-bar" id="year-bar" style="padding-right:70px"></div>
+    <div class="period-bar" id="month-bar" style="display:none;padding-top:4px;padding-right:70px"></div>
+    <div style="position:absolute;right:14px;top:8px">
+      <button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button>
+    </div>
   </div>
   <div class="px">
     <div class="card" style="padding:10px 0;overflow:hidden">
@@ -668,7 +668,7 @@ function computeStats(opts={}){
   let games=allGames(),sessions=allSessions();
   if(opts.year){games=games.filter(g=>g[0].startsWith(opts.year));sessions=sessions.filter(s=>s[0].startsWith(opts.year));}
   if(opts.month){const p=`${opts.year}-${opts.month}`;games=games.filter(g=>g[0].startsWith(p));sessions=sessions.filter(s=>s[0].startsWith(p));}
-  if(opts.focusPlayer!==undefined)games=games.filter(g=>Array.isArray(g[1])&&g[1].some(p=>p[0]===opts.focusPlayer));
+  if(opts.focusPlayer!==undefined)games=games.filter(g=>g[1].some(p=>p[0]===opts.focusPlayer));
   const st={};
   for(const g of games)for(const[pid,pts,rank,tobi] of g[1]){
     if(!st[pid])st[pid]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0,chips:0};
@@ -682,16 +682,15 @@ function getCumulative(pid,year,month){
   // セッション単位でチップ込み累計を計算
   const allSess=[...A.completedSessions,...(A.activeSession?[A.activeSession]:[])];
   const filtered=allSess.filter(s=>{
-    if(!s||!s.start||!Array.isArray(s.games))return false;
     const d=s.start.slice(0,10);
     if(year!=='all'&&!d.startsWith(year))return false;
     if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
-    return s.games.some(g=>Array.isArray(g[1])&&g[1].some(x=>x[0]===pid));
+    return s.games.some(g=>g[1].some(x=>x[0]===pid));
   }).sort((a,b)=>a.start.localeCompare(b.start));
   const result=[];let cum=0;
   for(const s of filtered){
     const chip=parseInt((s.chips||{})[String(pid)])||0;
-    const myGames=s.games.filter(g=>Array.isArray(g[1])&&g[1].some(x=>x[0]===pid));
+    const myGames=s.games.filter(g=>g[1].some(x=>x[0]===pid));
     myGames.forEach((g,i)=>{
       const gp=g[1].find(x=>x[0]===pid);
       cum+=(gp?gp[1]:0)+(i===myGames.length-1?chip:0);
@@ -723,10 +722,9 @@ function buildYearBar(yBid,mBid,onYear,onMonth){
   let curY,curM;
   if(yBid==='home-year-bar'){curY=homeYear;curM=homeMonth;}else if(yBid.startsWith('p-')){curY=playerYear;curM=playerMonth;}else{curY=statsYear;curM=statsMonth;}
   yBar.innerHTML=years.map(y=>`<button class="pbtn${y===curY?' on':''}" onclick="window['setY_${fn(yBid)}']('${y}')">${y==='all'?'全体':y+'年'}</button>`).join('');
-  const mBarShow=mBid==='month-bar'?'flex':'block';
-  window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);mBar.style.display=y!=='all'?mBarShow:'none';};
+  window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);mBar.style.display=y!=='all'?'block':'none';};
   if(curY!=='all'){
-    mBar.style.display=mBarShow;
+    mBar.style.display='block';
     const months=['all','01','02','03','04','05','06','07','08','09','10','11','12'];
     window[`setM_${fn(mBid)}`]=(m)=>{onMonth(m);buildYearBar(yBid,mBid,onYear,onMonth);};
     mBar.innerHTML=`<select class="month-sel" onchange="window['setM_${fn(mBid)}'](this.value)">${months.map(m=>`<option value="${m}"${m===curM?' selected':''}>${m==='all'?'全月':parseInt(m)+'月'}</option>`).join('')}</select>`;
@@ -1174,7 +1172,7 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>
-      <input class="sinput" type="text" id="gsc-${pid}" placeholder="0" oninput="updateGamePreview()">
+      <input class="sinput" type="text" id="gsc-${pid}" placeholder="0" inputmode="numeric" oninput="updateGamePreview()">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
@@ -1219,19 +1217,9 @@ function endSession(){
   if(!A.activeSession)return;
   const endDt=document.getElementById('sess-end-dt').value;
   if(!endDt){toast('終了日時を入力してください');return;}
-  // フォーカス中のチップ入力も含めてDOMから最新値を読み込んで保存
-  A.activeSession.chips=A.activeSession.chips||{};
-  A.activeSession.players.forEach(pid=>{
-    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
-    if(el)A.activeSession.chips[String(pid)]=parseInt(el.value)||0;
-  });
-  const chips=A.activeSession.chips;
+  const chips=A.activeSession.chips||{};
   const chipSum=A.activeSession.players.reduce((a,pid)=>a+(parseInt(chips[String(pid)])||0),0);
-  if(chipSum!==0){
-    toast(`⚠ チップ合計が${chipSum>0?'+':''}${chipSum}です（合計0にしてください）`);
-    closeModal('m-end-sess');
-    return;
-  }
+  if(chipSum!==0){toast(`⚠ チップ合計が${chipSum>0?'+':''}${chipSum}です（合計0になるよう確認してください）`);return;}
   const note=document.getElementById('sess-note').value;
   const sessId=A.activeSession.id;
   function doEnd(){
@@ -1483,7 +1471,7 @@ function openEditGame(sessId,gameIdx){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>
-      <input class="sinput" type="text" id="egsc-${pid}" value="${pts}">
+      <input class="sinput" type="text" id="egsc-${pid}" value="${pts}" inputmode="numeric">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
   document.getElementById('m-edit-game').classList.add('on');
