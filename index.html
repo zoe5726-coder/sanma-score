@@ -57,6 +57,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .pbtn{padding:5px 12px;border-radius:16px;border:1px solid var(--bd);background:var(--sf);color:var(--sub);font-size:12px;cursor:pointer;white-space:nowrap;transition:all .2s;flex-shrink:0}
 .pbtn.on{background:var(--ac);color:#000;border-color:var(--ac);font-weight:600}
 .month-sel{width:auto;background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:5px 14px;color:var(--tx);font-size:12px;cursor:pointer;outline:none;margin:6px 14px 4px}
+#month-bar .month-sel{margin:0}
 /* ── HOME ── */
 .hgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
 .scard{background:var(--sf);border-radius:12px;padding:14px;border:1px solid var(--bd);text-align:center}
@@ -233,12 +234,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <!-- 集計 -->
 <div id="t-stats" class="tab">
-  <div style="position:relative">
-    <div class="period-bar" id="year-bar" style="padding-right:70px"></div>
-    <div class="period-bar" id="month-bar" style="display:none;padding-top:4px;padding-right:70px"></div>
-    <div style="position:absolute;right:14px;top:8px">
-      <button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button>
-    </div>
+  <div class="period-bar" id="year-bar"></div>
+  <div style="display:flex;align-items:center;gap:8px;padding:4px 14px 2px;min-height:36px">
+    <div id="month-bar" style="flex:1;display:none"></div>
+    <button class="btn btn-p bsm" onclick="shareStatsTable()" style="flex-shrink:0">📸 共有</button>
   </div>
   <div class="px">
     <div class="card" style="padding:10px 0;overflow:hidden">
@@ -724,9 +723,10 @@ function buildYearBar(yBid,mBid,onYear,onMonth){
   let curY,curM;
   if(yBid==='home-year-bar'){curY=homeYear;curM=homeMonth;}else if(yBid.startsWith('p-')){curY=playerYear;curM=playerMonth;}else{curY=statsYear;curM=statsMonth;}
   yBar.innerHTML=years.map(y=>`<button class="pbtn${y===curY?' on':''}" onclick="window['setY_${fn(yBid)}']('${y}')">${y==='all'?'全体':y+'年'}</button>`).join('');
-  window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);mBar.style.display=y!=='all'?'block':'none';};
+  const mBarShow=mBid==='month-bar'?'flex':'block';
+  window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);mBar.style.display=y!=='all'?mBarShow:'none';};
   if(curY!=='all'){
-    mBar.style.display='block';
+    mBar.style.display=mBarShow;
     const months=['all','01','02','03','04','05','06','07','08','09','10','11','12'];
     window[`setM_${fn(mBid)}`]=(m)=>{onMonth(m);buildYearBar(yBid,mBid,onYear,onMonth);};
     mBar.innerHTML=`<select class="month-sel" onchange="window['setM_${fn(mBid)}'](this.value)">${months.map(m=>`<option value="${m}"${m===curM?' selected':''}>${m==='all'?'全月':parseInt(m)+'月'}</option>`).join('')}</select>`;
