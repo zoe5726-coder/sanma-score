@@ -232,10 +232,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <!-- 集計 -->
 <div id="t-stats" class="tab">
-  <div class="period-bar" id="year-bar"></div>
-  <div class="period-bar" id="month-bar" style="display:none;padding-top:4px"></div>
+  <div style="position:relative">
+    <div class="period-bar" id="year-bar" style="padding-right:70px"></div>
+    <div class="period-bar" id="month-bar" style="display:none;padding-top:4px;padding-right:70px"></div>
+    <div style="position:absolute;right:14px;top:8px">
+      <button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button>
+    </div>
+  </div>
   <div class="px">
-    <div style="text-align:right;margin-bottom:4px"><button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button></div>
     <div class="card" style="padding:10px 0;overflow:hidden">
       <table class="tbl2" id="stats-table">
         <thead><tr>
@@ -739,9 +743,9 @@ function renderHome(){
   const allEntries=Object.entries(st).filter(([,s])=>s.games>0);
   const rEl=document.getElementById('h-rankings');
   if(!allEntries.length){rEl.innerHTML='<div class="card"><div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div></div>';return;}
-  // 最多打数の1/3以上打った人だけランキング対象
+  // 最多打数の1/5以上打った人だけランキング対象
   const maxGames=Math.max(...allEntries.map(([,s])=>s.games));
-  const minGames=Math.ceil(maxGames/3);
+  const minGames=Math.ceil(maxGames/5);
   const entries=allEntries.filter(([,s])=>s.games>=minGames);
   let periodLabel='累計';if(homeYear!=='all'&&homeMonth!=='all')periodLabel=`${homeYear}年${parseInt(homeMonth)}月`;else if(homeYear!=='all')periodLabel=`${homeYear}年`;
   // ランキング生成ヘルパー
@@ -837,7 +841,7 @@ function renderPlayerContent(){
   <div class="card"><div class="ctitle">📈 累計ポイント推移</div><div class="ch2"><canvas id="trend-chart"></canvas></div></div>
   <div class="card"><div class="ctitle">📅 セッション別スコア</div><div id="p-sessions"></div></div>
   <div class="card"><div class="ctitle">🤝 同卓分析</div>
-    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓時の各自成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
+    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
     <div id="partner-content"></div>
   </div>`;
   setTimeout(()=>{
@@ -875,7 +879,7 @@ function renderPlayerSessions(){
     if(year!=='all'&&!d.startsWith(year))return false;
     if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
     return true;
-  }).slice().reverse(); // 新しい順
+  }).sort((a,b)=>b.start.localeCompare(a.start)); // 開催日新しい順
   if(!sessions.length){el.innerHTML='<div style="font-size:12px;color:var(--sub);text-align:center;padding:8px">この期間のセッションがありません</div>';return;}
   let html=`<table class="tbl2" style="width:100%"><thead><tr>
     <th style="text-align:left;width:60px">日付</th>
@@ -979,7 +983,8 @@ function buildSessionStats(sess,opts={}){
 function buildScoreTable(session,opts={}){
   const players=session.players.map(pid=>playerById(pid));const games=session.games;const chips=session.chips||{};
   const editable=opts.editable||false;const editSessId=opts.editSessId||session.id;
-  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=isActive||(editable&&isAdmin());
+  const chipReadOnly=opts.chipReadOnly||false;
+  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=(isActive&&!chipReadOnly)||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;}));
   const minW=Math.max(280,80+players.length*70);
@@ -1033,7 +1038,7 @@ function toggleCompletedChipSign(id,sessId,pid){
 // ══ SESSION RENDER ══
 function renderSession(){const el=document.getElementById('sess-content');A.activeSession?renderActiveSession(el):renderNoSession(el);}
 function renderNoSession(el){
-  const completed=[...A.completedSessions].reverse();
+  const completed=[...A.completedSessions].sort((a,b)=>b.start.localeCompare(a.start));
   el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
     <div style="font-size:42px;margin-bottom:10px">🎮</div>
     <p style="color:var(--sub);font-size:13px;margin-bottom:16px">セッションを開始して対局を記録しましょう</p>
@@ -1236,7 +1241,7 @@ function openSessDetail(id){
   const s=A.completedSessions.find(x=>x.id===id);if(!s)return;
   const d=s.start.slice(0,10).replace(/-/g,'/')+' '+s.start.slice(11,16)+'〜'+(s.end?s.end.slice(11,16):'');
   document.getElementById('m-sess-detail-title').textContent=d;
-  const editOpts=isAdmin()?{editable:true,editSessId:id}:{};
+  const editOpts=isAdmin()?{editable:true,editSessId:id}:{chipReadOnly:true,editSessId:id};
   document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
