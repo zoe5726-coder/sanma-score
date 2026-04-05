@@ -232,10 +232,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 <!-- 集計 -->
 <div id="t-stats" class="tab">
-  <div class="period-bar" id="year-bar"></div>
-  <div class="period-bar" id="month-bar" style="display:none;padding-top:4px"></div>
+  <div style="position:relative">
+    <div class="period-bar" id="year-bar" style="padding-right:70px"></div>
+    <div class="period-bar" id="month-bar" style="display:none;padding-top:4px;padding-right:70px"></div>
+    <div style="position:absolute;right:14px;top:8px">
+      <button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button>
+    </div>
+  </div>
   <div class="px">
-    <div style="text-align:right;margin-bottom:4px"><button class="btn btn-p bsm" onclick="shareStatsTable()">📸 共有</button></div>
     <div class="card" style="padding:10px 0;overflow:hidden">
       <table class="tbl2" id="stats-table">
         <thead><tr>
@@ -263,7 +267,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
   </div>
   <div class="period-bar" id="p-year-bar"></div>
-  <div class="period-bar" id="p-month-bar" style="display:none;padding-top:4px"></div>
+  <div style="position:relative">
+    <div class="period-bar" id="p-month-bar" style="display:none;padding-top:4px;padding-right:70px"></div>
+    <div style="position:absolute;right:14px;bottom:8px">
+      <button class="btn btn-p bsm" onclick="sharePlayerStats()">📸 共有</button>
+    </div>
+  </div>
   <div class="px" id="p-content"></div>
 </div>
 <!-- セッション -->
@@ -644,13 +653,13 @@ function sortedPlayers(){
 // ══ GAMES / SESSIONS ══
 function allGames(){
   const g=[...HIST.games];
-  for(const s of A.completedSessions){const d=s.start.slice(0,10);for(const gm of s.games)g.push([d,gm[1]]);}
-  if(A.activeSession){const d=A.activeSession.start.slice(0,10);for(const gm of A.activeSession.games)g.push([d,gm[1]]);}
+  for(const s of A.completedSessions){if(!s||!s.start||!Array.isArray(s.games))continue;const d=s.start.slice(0,10);for(const gm of s.games)g.push([d,gm[1]]);}
+  if(A.activeSession&&A.activeSession.start&&Array.isArray(A.activeSession.games)){const d=A.activeSession.start.slice(0,10);for(const gm of A.activeSession.games)g.push([d,gm[1]]);}
   return g;
 }
 function allSessions(){
   const h=[...HIST.sessions];
-  for(const s of A.completedSessions){const chips={};for(const[k,v] of Object.entries(s.chips||{}))chips[k]=v;h.push([s.start.slice(0,10),chips]);}
+  for(const s of A.completedSessions){if(!s||!s.start)continue;const chips={};for(const[k,v] of Object.entries(s.chips||{}))chips[k]=v;h.push([s.start.slice(0,10),chips]);}
   return h;
 }
 
@@ -739,9 +748,9 @@ function renderHome(){
   const allEntries=Object.entries(st).filter(([,s])=>s.games>0);
   const rEl=document.getElementById('h-rankings');
   if(!allEntries.length){rEl.innerHTML='<div class="card"><div class="empty"><div class="ico">🀄</div><p>データがありません<br><small style="font-size:11px">設定からExcelをインポートしてください</small></p></div></div>';return;}
-  // 最多打数の1/3以上打った人だけランキング対象
+  // 最多打数の1/5以上打った人だけランキング対象
   const maxGames=Math.max(...allEntries.map(([,s])=>s.games));
-  const minGames=Math.ceil(maxGames/3);
+  const minGames=Math.ceil(maxGames/5);
   const entries=allEntries.filter(([,s])=>s.games>=minGames);
   let periodLabel='累計';if(homeYear!=='all'&&homeMonth!=='all')periodLabel=`${homeYear}年${parseInt(homeMonth)}月`;else if(homeYear!=='all')periodLabel=`${homeYear}年`;
   // ランキング生成ヘルパー
@@ -837,7 +846,7 @@ function renderPlayerContent(){
   <div class="card"><div class="ctitle">📈 累計ポイント推移</div><div class="ch2"><canvas id="trend-chart"></canvas></div></div>
   <div class="card"><div class="ctitle">📅 セッション別スコア</div><div id="p-sessions"></div></div>
   <div class="card"><div class="ctitle">🤝 同卓分析</div>
-    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓時の各自成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
+    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
     <div id="partner-content"></div>
   </div>`;
   setTimeout(()=>{
@@ -875,7 +884,7 @@ function renderPlayerSessions(){
     if(year!=='all'&&!d.startsWith(year))return false;
     if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
     return true;
-  }).slice().reverse(); // 新しい順
+  }).sort((a,b)=>(b.start||'').localeCompare(a.start||'')); // 開催日新しい順
   if(!sessions.length){el.innerHTML='<div style="font-size:12px;color:var(--sub);text-align:center;padding:8px">この期間のセッションがありません</div>';return;}
   let html=`<table class="tbl2" style="width:100%"><thead><tr>
     <th style="text-align:left;width:60px">日付</th>
@@ -979,7 +988,8 @@ function buildSessionStats(sess,opts={}){
 function buildScoreTable(session,opts={}){
   const players=session.players.map(pid=>playerById(pid));const games=session.games;const chips=session.chips||{};
   const editable=opts.editable||false;const editSessId=opts.editSessId||session.id;
-  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=isActive||(editable&&isAdmin());
+  const chipReadOnly=opts.chipReadOnly||false;
+  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=(isActive&&!chipReadOnly)||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;}));
   const minW=Math.max(280,80+players.length*70);
@@ -1033,7 +1043,7 @@ function toggleCompletedChipSign(id,sessId,pid){
 // ══ SESSION RENDER ══
 function renderSession(){const el=document.getElementById('sess-content');A.activeSession?renderActiveSession(el):renderNoSession(el);}
 function renderNoSession(el){
-  const completed=[...A.completedSessions].reverse();
+  const completed=[...A.completedSessions].filter(s=>s&&s.start&&Array.isArray(s.games)&&Array.isArray(s.players)).sort((a,b)=>b.start.localeCompare(a.start));
   el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
     <div style="font-size:42px;margin-bottom:10px">🎮</div>
     <p style="color:var(--sub);font-size:13px;margin-bottom:16px">セッションを開始して対局を記録しましょう</p>
@@ -1043,8 +1053,8 @@ function renderNoSession(el){
   ${completed.length>0?`<div class="card"><div class="ctitle">📋 過去のセッション</div>${completed.map(s=>{
     const d=s.start.slice(0,10).replace(/-/g,'/');const endD=s.end?s.end.slice(0,10):null;
     const dateStr=endD&&endD!==s.start.slice(0,10)?`${d}〜${endD.slice(5).replace('-','/')}`:d;
-    const pNames=s.players.slice(0,4).map(pid=>esc(playerById(pid).name)).join(' · ');
-    return`<div class="sess-item"><div class="sess-info"><div class="sess-date">${dateStr} ${s.start.slice(11,16)}〜${s.end?s.end.slice(11,16):''}</div><div class="sess-meta">${pNames} | ${s.games.length}局</div></div>
+    const pNames=(s.players||[]).slice(0,4).map(pid=>esc(playerById(pid).name)).join(' · ');
+    return`<div class="sess-item"><div class="sess-info"><div class="sess-date">${dateStr} ${s.start.slice(11,16)}〜${s.end?s.end.slice(11,16):''}</div><div class="sess-meta">${pNames} | ${(s.games||[]).length}局</div></div>
       <button class="btn btn-s bxsm" onclick="openSessDetail('${s.id}')">詳細</button>
       ${isAdmin()?`<button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>`:''}
     </div>`;}).join('')}</div>`:''}`;
@@ -1236,7 +1246,7 @@ function openSessDetail(id){
   const s=A.completedSessions.find(x=>x.id===id);if(!s)return;
   const d=s.start.slice(0,10).replace(/-/g,'/')+' '+s.start.slice(11,16)+'〜'+(s.end?s.end.slice(11,16):'');
   document.getElementById('m-sess-detail-title').textContent=d;
-  const editOpts=isAdmin()?{editable:true,editSessId:id}:{};
+  const editOpts=isAdmin()?{editable:true,editSessId:id}:{chipReadOnly:true,editSessId:id};
   document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
@@ -1311,6 +1321,92 @@ async function shareSession(id){
       }else{
         const a=document.createElement('a');a.download='sanma-score.png';a.href=URL.createObjectURL(blob);a.click();
       }
+    },'image/png');
+  }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
+}
+async function sharePlayerStats(){
+  const pid=selPid,p=playerById(pid);
+  const opts={};if(playerYear!=='all')opts.year=playerYear;if(playerMonth!=='all')opts.month=playerMonth;
+  const st=computeStats(opts),s=st[pid];
+  if(!s||!s.games){toast('データがありません');return;}
+  let periodLabel='累計';if(playerYear!=='all'&&playerMonth!=='all')periodLabel=`${playerYear}年${parseInt(playerMonth)}月`;else if(playerYear!=='all')periodLabel=`${playerYear}年`;
+  const BG='#1a1a2e',SF='#16213e',TX='#e2e8f0',SUB='#94a3b8',GRN='#34d399',RED='#f87171',BD='#2d3748';
+  const rk=s.r1+s.r2+s.r3;
+  const pct=n=>rk>0?(n/rk*100).toFixed(1)+'%':'0%';
+  const bar=(n,color,textColor)=>`<div style="flex:1;background:#1e293b;border-radius:3px;height:18px;overflow:hidden"><div style="width:${pct(n)};height:100%;background:${color};border-radius:3px;display:flex;align-items:center;padding-left:4px"><span style="font-size:10px;font-weight:700;color:${textColor||'#000'}">${pct(n)}</span></div></div>`;
+  const html=`<div style="background:${BG};padding:16px;width:320px;font-family:-apple-system,BlinkMacSystemFont,sans-serif;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">
+      <span style="font-size:20px">🀄</span>
+      <span style="font-size:13px;font-weight:700;color:${SUB}">三人麻雀</span>
+      <span style="font-size:13px;font-weight:700;color:${TX}">${esc(periodLabel)}</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid ${BD}">
+      <div style="width:12px;height:12px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
+      <span style="font-size:20px;font-weight:700;color:${p.color}">${esc(p.name)}</span>
+      <span style="font-size:12px;color:${SUB}">${s.games}局</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:10px">
+      <div style="background:${SF};border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:9px;color:${SUB};margin-bottom:2px">合計P</div>
+        <div style="font-size:22px;font-weight:700;color:${s.totalP>=0?GRN:RED}">${s.totalP>=0?'+':''}${s.totalP.toFixed(0)}</div>
+      </div>
+      <div style="background:${SF};border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:9px;color:${SUB};margin-bottom:2px">平均P</div>
+        <div style="font-size:22px;font-weight:700;color:${s.avgP>=0?GRN:RED}">${s.avgP>=0?'+':''}${s.avgP.toFixed(2)}</div>
+      </div>
+      <div style="background:${SF};border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:9px;color:${SUB};margin-bottom:2px">平均着順</div>
+        <div style="font-size:22px;font-weight:700;color:${TX}">${s.avgRank.toFixed(3)}</div>
+      </div>
+      <div style="background:${SF};border-radius:8px;padding:9px;text-align:center">
+        <div style="font-size:9px;color:${SUB};margin-bottom:2px">飛び率</div>
+        <div style="font-size:22px;font-weight:700;color:${RED}">${(s.tobir*100).toFixed(1)}%</div>
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:10px;color:${SUB};width:22px;text-align:right">1着</span>
+        ${bar(s.r1,'#f59e0b','#000')}
+        <span style="font-size:10px;color:${SUB};width:22px">${s.r1}回</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+        <span style="font-size:10px;color:${SUB};width:22px;text-align:right">2着</span>
+        ${bar(s.r2,'#9ca3af','#000')}
+        <span style="font-size:10px;color:${SUB};width:22px">${s.r2}回</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;color:${SUB};width:22px;text-align:right">3着</span>
+        ${bar(s.r3,'#b45309','#fff')}
+        <span style="font-size:10px;color:${SUB};width:22px">${s.r3}回</span>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+      <div style="background:${SF};border-radius:6px;padding:7px;text-align:center">
+        <div style="font-size:9px;color:${SUB}">点数合計</div>
+        <div style="font-size:13px;font-weight:700;color:${s.pts>=0?GRN:RED}">${s.pts>=0?'+':''}${s.pts}</div>
+      </div>
+      <div style="background:${SF};border-radius:6px;padding:7px;text-align:center">
+        <div style="font-size:9px;color:${SUB}">チップ合計</div>
+        <div style="font-size:13px;font-weight:700;color:${s.chips>=0?GRN:RED}">${s.chips>=0?'+':''}${s.chips}</div>
+      </div>
+      <div style="background:${SF};border-radius:6px;padding:7px;text-align:center">
+        <div style="font-size:9px;color:${SUB}">ラス回避率</div>
+        <div style="font-size:13px;font-weight:700;color:${GRN}">${((1-s.r3r)*100).toFixed(1)}%</div>
+      </div>
+    </div>
+  </div>`;
+  toast('画像を生成中…');
+  const wrap=document.createElement('div');wrap.style.cssText='position:fixed;left:-9999px;top:0;z-index:-1';wrap.innerHTML=html;document.body.appendChild(wrap);
+  try{
+    const canvas=await html2canvas(wrap.firstElementChild,{backgroundColor:'#1a1a2e',scale:2,useCORS:true,logging:false});
+    document.body.removeChild(wrap);
+    canvas.toBlob(async(blob)=>{
+      if(!blob){toast('画像生成に失敗しました');return;}
+      const file=new File([blob],'sanma-player.png',{type:'image/png'});
+      if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
+        try{await navigator.share({files:[file],title:`${p.name}の成績`});}
+        catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.download='sanma-player.png';a.href=URL.createObjectURL(blob);a.click();}}
+      }else{const a=document.createElement('a');a.download='sanma-player.png';a.href=URL.createObjectURL(blob);a.click();}
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
 }
@@ -1554,8 +1650,28 @@ function dlBackup(){
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sData),"セッション");
   // Sheet3: 対局
   const gData=[["セッションID","局番","日時","P1_ID","P1_点数","P1_順位","P1_飛び","P2_ID","P2_点数","P2_順位","P2_飛び","P3_ID","P3_点数","P3_順位","P3_飛び"]];
-  for(const s of A.completedSessions){s.games.forEach((game,idx)=>{const row=[s.id,idx+1,game[0]];game[1].forEach(([pid,pts,rank,tobi])=>row.push(pid,pts,rank,tobi));while(row.length<15)row.push('');gData.push(row);});}
+  for(const s of A.completedSessions){if(!s||!Array.isArray(s.games))continue;s.games.forEach((game,idx)=>{const row=[s.id,idx+1,game[0]];(game[1]||[]).forEach(([pid,pts,rank,tobi])=>row.push(pid,pts,rank,tobi));while(row.length<15)row.push('');gData.push(row);});}
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gData),"対局");
+  // Sheet4: 元データ形式（一括インポートと同じ形式・人間が確認用）
+  const rawData=[];
+  const sortedSess=[...A.completedSessions].sort((a,b)=>a.start.localeCompare(b.start));
+  for(const s of sortedSess){
+    const players=(s.players||[]).map(pid=>playerById(pid));
+    const chips=s.chips||{};
+    const dateStr=(s.start||'').slice(0,10).replace(/-/g,'/')+(s.end?` 〜 ${s.end.slice(0,10).replace(/-/g,'/')}`:'')+` (${(s.games||[]).length}局)`+(s.note?` [${s.note}]`:'');
+    // 日付ヘッダー行: 日付 | プレイヤー名...
+    rawData.push([dateStr,...players.map(p=>p.name)]);
+    // チップ行
+    rawData.push(['チップ',...players.map(p=>parseInt(chips[String(p.id)])||0)]);
+    // 対局行
+    for(const game of s.games){
+      const row=[''];
+      for(const p of players){const gp=game[1].find(x=>x[0]===p.id);row.push(gp?gp[1]:'');}
+      rawData.push(row);
+    }
+    rawData.push([]); // セッション間の空行
+  }
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rawData),'元データ形式');
   XLSX.writeFile(wb,`sanma-backup-${new Date().toISOString().slice(0,10)}.xlsx`);
   toast('バックアップをダウンロードしました');
 }
