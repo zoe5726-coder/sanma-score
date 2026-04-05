@@ -987,9 +987,10 @@ function buildSessionStats(sess,opts={}){
   sess.games.forEach(g=>{g[1].forEach(([pid,pts,rank,tobi])=>{if(st[pid]!==undefined){st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;}});});
   players.forEach(p=>{const s=st[p.id];const rk=s.r1+s.r2+s.r3;s.avgRank=rk>0?(s.r1+s.r2*2+s.r3*3)/rk:0;s.chip=parseInt(chips[String(p.id)])||0;s.total=s.pts+s.chip;});
   const metrics=[{k:'games',l:'打数',f:v=>v,c:()=>''},{k:'r1',l:'1着',f:v=>v,c:()=>''},{k:'r2',l:'2着',f:v=>v,c:()=>''},{k:'r3',l:'3着',f:v=>v,c:()=>''},{k:'tobi',l:'飛び',f:v=>v,c:()=>''},{k:'avgRank',l:'平均着順',f:v=>v.toFixed(3),c:()=>''},{k:'pts',l:'スコア合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'chip',l:'チップ合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'total',l:'総合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'}];
-  const minW=Math.max(280,80+players.length*70);
+  const firstColW=opts.firstColW||64;
+  const minW=Math.max(280,firstColW+players.length*70);
   let html=opts.noWrap?'':`<div style="overflow-x:auto;margin:0 0 12px">`;
-  html+=`<table class="sess-stat-tbl" style="min-width:${minW}px"><thead><tr><th></th>`;
+  html+=`<table class="sess-stat-tbl" style="min-width:${minW}px"><thead><tr><th style="width:${firstColW}px"></th>`;
   players.forEach(p=>{html+=`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`;});
   html+=`</tr></thead><tbody>`;
   metrics.forEach(m=>{html+=`<tr><td>${m.l}</td>`;players.forEach(p=>{const v=st[p.id][m.k];html+=`<td class="${m.c(v)}">${m.f(v)}</td>`;});html+=`</tr>`;});
@@ -1089,7 +1090,7 @@ function renderActiveSession(el){
   </div>
   <div class="card" style="padding:10px 0">
     <div class="score-tbl-wrap">
-      ${s.games.length>0?`<div id="sess-stats-card" style="padding:0 0 4px">${buildSessionStats(s,{noWrap:true})}</div>`:''}
+      ${s.games.length>0?`<div id="sess-stats-card" style="padding:0 0 4px">${buildSessionStats(s,{noWrap:true,firstColW:72})}</div>`:''}
       ${buildScoreTable(s)}
     </div>
   </div>
@@ -1193,7 +1194,22 @@ function startSession(){
 }
 
 // ══ ADD GAME ══
-function openAddGame(){if(!A.activeSession)return;sessGameSel=[];buildGamePlayerGrid();document.getElementById('game-score-section').style.display='none';document.getElementById('game-save-btn').disabled=true;document.getElementById('m-add-game').classList.add('on');}
+function openAddGame(){
+  if(!A.activeSession)return;
+  // 参加者が3人の場合は全員を自動選択してスコア入力画面へ直接進む
+  if(A.activeSession.players.length===3){
+    sessGameSel=[...A.activeSession.players];
+    buildGamePlayerGrid();
+    document.getElementById('game-score-section').style.display='block';
+    buildGameScoreInputs();
+  } else {
+    sessGameSel=[];
+    buildGamePlayerGrid();
+    document.getElementById('game-score-section').style.display='none';
+    document.getElementById('game-save-btn').disabled=true;
+  }
+  document.getElementById('m-add-game').classList.add('on');
+}
 function buildGamePlayerGrid(){
   const players=A.activeSession.players.map(pid=>playerById(pid));
   document.getElementById('game-player-grid').innerHTML=players.map(p=>{const on=sessGameSel.includes(p.id);
@@ -1341,7 +1357,8 @@ function openSessDetail(id){
   const d=s.start.slice(0,10).replace(/-/g,'/')+' '+s.start.slice(11,16)+'〜'+(s.end?s.end.slice(11,16):'');
   document.getElementById('m-sess-detail-title').textContent=d;
   const editOpts=isAdmin()?{editable:true,editSessId:id}:{chipReadOnly:true,editSessId:id};
-  document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
+  const detailFirstColW=isAdmin()?72:44;
+  document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true,firstColW:detailFirstColW})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
   if(isAdmin()){actEl.innerHTML=`${shareBtn}<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button><button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
