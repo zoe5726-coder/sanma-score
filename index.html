@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
 <title>三麻スコア管理</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🀄</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -668,7 +669,7 @@ function computeStats(opts={}){
   let games=allGames(),sessions=allSessions();
   if(opts.year){games=games.filter(g=>g[0].startsWith(opts.year));sessions=sessions.filter(s=>s[0].startsWith(opts.year));}
   if(opts.month){const p=`${opts.year}-${opts.month}`;games=games.filter(g=>g[0].startsWith(p));sessions=sessions.filter(s=>s[0].startsWith(p));}
-  if(opts.focusPlayer!==undefined)games=games.filter(g=>g[1].some(p=>p[0]===opts.focusPlayer));
+  if(opts.focusPlayer!==undefined)games=games.filter(g=>Array.isArray(g[1])&&g[1].some(p=>p[0]===opts.focusPlayer));
   const st={};
   for(const g of games)for(const[pid,pts,rank,tobi] of g[1]){
     if(!st[pid])st[pid]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0,chips:0};
@@ -682,15 +683,16 @@ function getCumulative(pid,year,month){
   // セッション単位でチップ込み累計を計算
   const allSess=[...A.completedSessions,...(A.activeSession?[A.activeSession]:[])];
   const filtered=allSess.filter(s=>{
+    if(!s||!s.start||!Array.isArray(s.games))return false;
     const d=s.start.slice(0,10);
     if(year!=='all'&&!d.startsWith(year))return false;
     if(month!=='all'&&!d.startsWith(`${year}-${month}`))return false;
-    return s.games.some(g=>g[1].some(x=>x[0]===pid));
+    return s.games.some(g=>Array.isArray(g[1])&&g[1].some(x=>x[0]===pid));
   }).sort((a,b)=>a.start.localeCompare(b.start));
   const result=[];let cum=0;
   for(const s of filtered){
     const chip=parseInt((s.chips||{})[String(pid)])||0;
-    const myGames=s.games.filter(g=>g[1].some(x=>x[0]===pid));
+    const myGames=s.games.filter(g=>Array.isArray(g[1])&&g[1].some(x=>x[0]===pid));
     myGames.forEach((g,i)=>{
       const gp=g[1].find(x=>x[0]===pid);
       cum+=(gp?gp[1]:0)+(i===myGames.length-1?chip:0);
