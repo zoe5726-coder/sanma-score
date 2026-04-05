@@ -685,10 +685,10 @@ function computeStats(opts={}){
   if(opts.month){const p=`${opts.year}-${opts.month}`;games=games.filter(g=>g[0].startsWith(p));sessions=sessions.filter(s=>s[0].startsWith(p));}
   if(opts.focusPlayer!==undefined)games=games.filter(g=>Array.isArray(g[1])&&g[1].some(p=>p[0]===opts.focusPlayer));
   const st={};
-  for(const g of games)for(const[pid,pts,rank,tobi] of g[1]){
+  for(const g of games){if(!Array.isArray(g[1]))continue;for(const[pid,pts,rank,tobi] of g[1]){
     if(!st[pid])st[pid]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0,chips:0};
     st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;
-  }
+  }}
   for(const[d,chips] of sessions)for(const[ps,ca] of Object.entries(chips)){const pid=parseInt(ps);if(st[pid])st[pid].chips+=ca;}
   for(const s of Object.values(st)){const rk=s.r1+s.r2+s.r3;s.r1r=s.games>0?s.r1/s.games:0;s.r2r=s.games>0?s.r2/s.games:0;s.r3r=s.games>0?s.r3/s.games:0;s.tobir=s.games>0?s.tobi/s.games:0;s.avgRank=rk>0?(s.r1+s.r2*2+s.r3*3)/rk:0;s.totalP=s.pts+s.chips;s.avgP=s.games>0?s.totalP/s.games:0;}
   return st;
@@ -990,7 +990,7 @@ function buildSessionStats(sess,opts={}){
   if(!sess||!sess.players||!sess.games||!sess.games.length)return'';
   const players=sess.players.map(pid=>playerById(pid));const chips=sess.chips||{};const st={};
   players.forEach(p=>{st[p.id]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0};});
-  sess.games.forEach(g=>{g[1].forEach(([pid,pts,rank,tobi])=>{if(st[pid]!==undefined){st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;}});});
+  sess.games.forEach(g=>{if(!Array.isArray(g[1]))return;g[1].forEach(([pid,pts,rank,tobi])=>{if(st[pid]!==undefined){st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;}});});
   players.forEach(p=>{const s=st[p.id];const rk=s.r1+s.r2+s.r3;s.avgRank=rk>0?(s.r1+s.r2*2+s.r3*3)/rk:0;s.chip=parseInt(chips[String(p.id)])||0;s.total=s.pts+s.chip;});
   const metrics=[{k:'games',l:'打数',f:v=>v,c:()=>''},{k:'r1',l:'1着',f:v=>v,c:()=>''},{k:'r2',l:'2着',f:v=>v,c:()=>''},{k:'r3',l:'3着',f:v=>v,c:()=>''},{k:'tobi',l:'飛び',f:v=>v,c:()=>''},{k:'avgRank',l:'平均着順',f:v=>v.toFixed(3),c:()=>''},{k:'pts',l:'スコア合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'chip',l:'チップ合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'},{k:'total',l:'総合計',f:v=>(v>=0?'+':'')+v,c:v=>v>=0?'pos':'neg'}];
   const firstColW=opts.firstColW||64;
@@ -1010,14 +1010,14 @@ function buildScoreTable(session,opts={}){
   const chipReadOnly=opts.chipReadOnly||false;
   const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=(isActive&&!chipReadOnly)||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
-  games.forEach(g=>g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;}));
+  games.forEach(g=>{if(!Array.isArray(g[1]))return;g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;});});
   const minW=Math.max(280,80+players.length*70);
   let html=`<table class="score-tbl" style="min-width:${minW}px"><thead><tr><th style="width:${showEditBtns?'72px':'44px'}">${showEditBtns?'管理':'局'}</th>${players.map(p=>`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`).join('')}</tr></thead><tbody>`;
   games.forEach((game,idx)=>{
     const time=game[0].length>10?game[0].slice(11,16):'';
     if(showEditBtns){html+=`<tr><td style="text-align:center"><div style="font-size:9px;font-weight:600;margin-bottom:3px">${idx+1}</div><div class="game-admin-btns"><button class="gab" onclick="openEditGame('${editSessId}',${idx})">✏️</button><button class="gab del" onclick="deleteGame('${editSessId}',${idx})">🗑</button></div></td>`;}
     else{html+=`<tr><td style="text-align:center"><div style="font-weight:600;font-size:10px">${idx+1}</div>${time?`<div style="font-size:9px;color:var(--sub)">${time}</div>`:''}</td>`;}
-    players.forEach(p=>{const gp=game[1].find(x=>x[0]===p.id);if(!gp){html+=`<td style="color:var(--sf2)">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';html+=`<td class="${gp[1]>=0?'pos':'neg'}"><span class="medal">${em}</span><span class="mscore">${gp[1]>=0?'+':''}${gp[1]}</span></td>`;}});
+    players.forEach(p=>{const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;if(!gp){html+=`<td style="color:var(--sf2)">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';html+=`<td class="${gp[1]>=0?'pos':'neg'}"><span class="medal">${em}</span><span class="mscore">${gp[1]>=0?'+':''}${gp[1]}</span></td>`;}});
     html+=`</tr>`;
   });
   html+=`<tr class="total-row"><td style="text-align:center;font-size:10px">計</td>`;players.forEach(p=>{html+=`<td class="${ptTot[p.id]>=0?'pos':'neg'}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`;});
@@ -1035,12 +1035,12 @@ function buildScoreTable(session,opts={}){
 function chipInput(pid,value){
   if(!A.activeSession)return;
   const num=parseInt(value)||0;
-  const ptTot=A.activeSession.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);
+  const ptTot=A.activeSession.games.reduce((acc,g)=>{const gp=Array.isArray(g[1])?g[1].find(x=>x[0]===pid):null;return acc+(gp?gp[1]:0);},0);
   const tot=ptTot+num;
   const cell=document.getElementById(`totalP-${A.activeSession.id}-${pid}`);
   if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}
   const tempSess={...A.activeSession,chips:{...A.activeSession.chips,[String(pid)]:num}};
-  const statsEl=document.getElementById('sess-stats-card');if(statsEl)statsEl.innerHTML=buildSessionStats(tempSess);
+  const statsEl=document.getElementById('sess-stats-card');if(statsEl)statsEl.innerHTML=buildSessionStats(tempSess,{firstColW:72});
 }
 function chipBlur(pid,value){
   if(!A.activeSession)return;
@@ -1400,7 +1400,7 @@ function buildShareHTML(s){
   let sctT=`<table style="width:100%;border-collapse:collapse"><thead><tr><th style="${th}">#</th>${players.map(p=>`<th style="${th}"><span style="color:${p.color}">${esc(p.name)}</span></th>`).join('')}</tr></thead><tbody>`;
   s.games.forEach((game,idx)=>{
     sctT+=`<tr><td style="padding:4px;text-align:center;font-size:10px;color:${SUB};border-bottom:1px solid ${BD}">${idx+1}</td>`;
-    players.forEach(p=>{const gp=game[1].find(x=>x[0]===p.id);if(!gp){sctT+=`<td style="padding:4px;text-align:center;font-size:11px;color:${BD};border-bottom:1px solid ${BD}">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';sctT+=`<td style="padding:4px;text-align:center;font-size:11px;color:${gp[1]>=0?GRN:RED};border-bottom:1px solid ${BD}">${em}${gp[1]>=0?'+':''}${gp[1]}</td>`;}});
+    players.forEach(p=>{const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;if(!gp){sctT+=`<td style="padding:4px;text-align:center;font-size:11px;color:${BD};border-bottom:1px solid ${BD}">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';sctT+=`<td style="padding:4px;text-align:center;font-size:11px;color:${gp[1]>=0?GRN:RED};border-bottom:1px solid ${BD}">${em}${gp[1]>=0?'+':''}${gp[1]}</td>`;}});
     sctT+=`</tr>`;
   });
   sctT+=`<tr style="background:${SF}"><td style="padding:5px 4px;text-align:center;font-size:10px;color:${SUB}">計</td>${players.map(p=>`<td style="padding:5px 4px;text-align:center;font-size:13px;font-weight:700;color:${ptTot[p.id]>=0?GRN:RED}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`).join('')}</tr>`;
@@ -1783,7 +1783,7 @@ function dlBackup(){
     // 対局行
     for(const game of s.games){
       const row=[''];
-      for(const p of players){const gp=game[1].find(x=>x[0]===p.id);row.push(gp?gp[1]:'');}
+      for(const p of players){const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;row.push(gp?gp[1]:'');}
       rawData.push(row);
     }
     rawData.push([]); // セッション間の空行
@@ -1819,7 +1819,7 @@ function importBackup(input){
         const completedSessions=sRows.map(row=>{
           const sid=String(row[0]);const chips={};
           String(row[4]||'').split(',').forEach(entry=>{const[k,v]=entry.split(':');if(k&&v!==undefined)chips[k.trim()]=Number(v);});
-          const players=String(row[3]||'').split(',').map(Number).filter(n=>!isNaN(n)&&n!=='');
+          const players=String(row[3]||'').split(',').map(s=>parseInt(s.trim())).filter(n=>Number.isInteger(n)&&!isNaN(n));
           return{id:sid,start:String(row[1]||''),end:String(row[2]||''),players,games:gamesBySess[sid]||[],chips,note:String(row[5]||'')};
         });
         A.newPlayers=newPlayers;A.completedSessions=completedSessions;A.activeSession=null;
