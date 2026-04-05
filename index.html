@@ -1174,7 +1174,7 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>
-      <input class="sinput" type="text" id="gsc-${pid}" placeholder="0" inputmode="numeric" oninput="updateGamePreview()">
+      <input class="sinput" type="text" id="gsc-${pid}" placeholder="0" oninput="updateGamePreview()">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
@@ -1219,9 +1219,19 @@ function endSession(){
   if(!A.activeSession)return;
   const endDt=document.getElementById('sess-end-dt').value;
   if(!endDt){toast('終了日時を入力してください');return;}
-  const chips=A.activeSession.chips||{};
+  // フォーカス中のチップ入力も含めてDOMから最新値を読み込んで保存
+  A.activeSession.chips=A.activeSession.chips||{};
+  A.activeSession.players.forEach(pid=>{
+    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
+    if(el)A.activeSession.chips[String(pid)]=parseInt(el.value)||0;
+  });
+  const chips=A.activeSession.chips;
   const chipSum=A.activeSession.players.reduce((a,pid)=>a+(parseInt(chips[String(pid)])||0),0);
-  if(chipSum!==0){toast(`⚠ チップ合計が${chipSum>0?'+':''}${chipSum}です（合計0になるよう確認してください）`);return;}
+  if(chipSum!==0){
+    toast(`⚠ チップ合計が${chipSum>0?'+':''}${chipSum}です（合計0にしてください）`);
+    closeModal('m-end-sess');
+    return;
+  }
   const note=document.getElementById('sess-note').value;
   const sessId=A.activeSession.id;
   function doEnd(){
@@ -1473,7 +1483,7 @@ function openEditGame(sessId,gameIdx){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>
-      <input class="sinput" type="text" id="egsc-${pid}" value="${pts}" inputmode="numeric">
+      <input class="sinput" type="text" id="egsc-${pid}" value="${pts}">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
   document.getElementById('m-edit-game').classList.add('on');
