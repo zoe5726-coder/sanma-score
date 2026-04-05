@@ -587,7 +587,16 @@ function loadUiState(){
   }}catch(e){}
 }
 function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
-function mergeRemote(data){if(!data)return;A={...A,...data,settings:{...A.settings,...(data.settings||{})}};}
+function mergeRemote(data){
+  if(!data)return;
+  A={...A,...data,settings:{...A.settings,...(data.settings||{})}};
+  // 重複セッションを除去（IDが同じものは最初の1件だけ残す）
+  const seen=new Set();
+  A.completedSessions=(A.completedSessions||[]).filter(s=>{
+    if(!s||!s.id||seen.has(s.id))return false;
+    seen.add(s.id);return true;
+  });
+}
 
 function loadApp(){
   loadUiState();
@@ -1028,8 +1037,15 @@ function chipInput(pid,value){
 }
 function chipBlur(pid,value){
   if(!A.activeSession)return;
-  A.activeSession.chips[String(pid)]=parseInt(value)||0;
-  saveApp();
+  const num=parseInt(value)||0;
+  A.activeSession.chips[String(pid)]=num;
+  if(fbDb&&fbReady){
+    // チップだけを部分更新（全体上書きするとセッション終了を上書きしてしまう危険がある）
+    fbDb.ref(`${FB_PATH}/activeSession/chips/${pid}`).set(num)
+      .catch(e=>console.error('chip save error',e));
+  } else {
+    localStorage.setItem('sanma-v2',JSON.stringify(A));
+  }
 }
 function toggleChipSign(id,pid){
   const el=document.getElementById(id);if(!el)return;
@@ -1155,8 +1171,25 @@ function toggleFavInGrid(pid){const i=A.favorites.indexOf(pid);if(i!==-1)A.favor
 function startSession(){
   const sel=window._sessSelPlayers||[];if(sel.length<2){toast('2人以上選択してください');return;}
   const dtVal=document.getElementById('sess-start-dt').value;if(!dtVal){toast('開始日時を入力してください');return;}
-  A.activeSession={id:Date.now().toString(),start:dtVal,players:[...sel],games:[],chips:{}};
-  saveApp();closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');
+  const newSess={id:Date.now().toString(),start:dtVal,players:[...sel],games:[],chips:{}};
+  if(fbDb&&fbReady){
+    _skipNextRemote=true;
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(cur!==null&&cur!==undefined)return; // 既に開始済みならアボート
+      return newSess;
+    },(err,committed)=>{
+      if(err||!committed){
+        _skipNextRemote=false;
+        toast(committed===false?'⚠ 他のユーザーがすでにセッションを開始しています':'保存エラー');
+        return;
+      }
+      A.activeSession=newSess;
+      closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');
+    });
+  } else {
+    A.activeSession=newSess;
+    saveApp();closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');
+  }
 }
 
 // ══ ADD GAME ══
@@ -1202,8 +1235,27 @@ function saveGameToSession(){
   const vals=sessGameSel.map(pid=>{const v=parseInt(document.getElementById('gsc-'+pid)?.value);return{pid,pts:isNaN(v)?0:v};});
   const sum=vals.reduce((a,v)=>a+v.pts,0);if(sum!==0){toast('合計が0になっていません（'+sum+'）');return;}
   const res=directPts(vals);const now=new Date();const localNow=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  A.activeSession.games.push([localNow,res.map(r=>[r.pid,r.pts,r.rank,r.pts<=-60?1:0])]);
-  saveApp();closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
+  const game=[localNow,res.map(r=>[r.pid,r.pts,r.rank,r.pts<=-60?1:0])];
+  if(fbDb&&fbReady){
+    const sessId=A.activeSession.id;
+    _skipNextRemote=true;
+    // トランザクションでアトミックにゲームを追加（複数人同時追加でも消えない）
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(!cur||cur.id!==sessId)return; // セッションが変わっていたらアボート
+      return{...cur,games:[...(cur.games||[]),game]};
+    },(err,committed,snap)=>{
+      if(err||!committed){
+        _skipNextRemote=false;
+        toast(committed===false?'⚠ セッションが変更されました。再度お試しください':'保存エラー');
+        return;
+      }
+      if(A.activeSession&&snap&&snap.val()){A.activeSession=snap.val();}
+      closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
+    });
+  } else {
+    A.activeSession.games.push(game);
+    saveApp();closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
+  }
 }
 function toggleSign(id,onChangeFn){
   const el=document.getElementById(id);if(!el)return;
@@ -1240,7 +1292,7 @@ function endSession(){
   if(!A.activeSession)return;
   const endDt=document.getElementById('sess-end-dt').value;
   if(!endDt){toast('終了日時を入力してください');return;}
-  // フォーカス中のチップ入力も含めてDOMから最新値を読み込んで保存
+  // フォーカス中のチップ入力も含めてDOMから最新値を読み込み
   A.activeSession.chips=A.activeSession.chips||{};
   A.activeSession.players.forEach(pid=>{
     const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
@@ -1255,22 +1307,31 @@ function endSession(){
   }
   const note=document.getElementById('sess-note').value;
   const sessId=A.activeSession.id;
-  function doEnd(){
-    A.completedSessions.push({...A.activeSession,end:endDt,note});
-    A.activeSession=null;saveApp();closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
-  }
+  const sessData={...A.activeSession,end:endDt,note};
   if(fbDb&&fbReady){
-    // 他ユーザーが既に終了していないかFirebaseで確認
-    fbDb.ref(FB_PATH+'/activeSession/id').once('value',snap=>{
-      if(!snap.val()||snap.val()!==sessId){
+    // トランザクションでアトミックに終了（複数人が同時に終了ボタンを押しても1回しか実行されない）
+    _skipNextRemote=true;
+    fbDb.ref(FB_PATH).transaction(current=>{
+      if(!current)return; // アボート
+      if(!current.activeSession||current.activeSession.id!==sessId)return; // 既に終了済み→アボート
+      return{...current,activeSession:null,completedSessions:[...(current.completedSessions||[]),sessData]};
+    },(err,committed,snap)=>{
+      if(err){_skipNextRemote=false;toast('保存エラー: '+err.message);return;}
+      if(!committed){
+        // 他のユーザーが先に終了した
+        _skipNextRemote=false;
         toast('⚠ このセッションは既に他のユーザーが終了しました');
+        if(snap&&snap.val())mergeRemote(snap.val());
         A.activeSession=null;closeModal('m-end-sess');updateHdrBadge();renderSession();
         return;
       }
-      doEnd();
+      // 自分が正常に終了できた → snapshotからローカル状態を更新
+      if(snap&&snap.val())mergeRemote(snap.val());
+      closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
     });
   } else {
-    doEnd();
+    A.completedSessions.push(sessData);
+    A.activeSession=null;saveApp();closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
   }
 }
 
