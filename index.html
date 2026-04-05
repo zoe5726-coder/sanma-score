@@ -189,6 +189,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sinput:focus{border-color:var(--ac)}
 .srow{display:flex;align-items:center;gap:10px;background:var(--sf2);border-radius:10px;padding:11px;margin-bottom:9px}
 .sname{flex:1;font-size:13px;font-weight:500}
+/* ── STICKY SCORE HEADER ── */
+#sticky-score-header{position:fixed;top:var(--hdr);left:50%;transform:translateX(-50%);width:100%;max-width:430px;z-index:50;display:none;overflow:hidden;box-shadow:0 3px 10px rgba(0,0,0,.6);border-bottom:1px solid var(--bd)}
+#sticky-score-header .score-tbl{border-radius:0}
 </style>
 </head>
 <body>
@@ -597,7 +600,16 @@ function loadApp(){
       syncSettingsUI();updateHdrBadge();setSyncStatus('synced','同期済み');go(currentTab||'home');
     } else {
       if(_skipNextRemote){_skipNextRemote=false;setSyncStatus('synced','同期済み');return;}
-      if(data){mergeRemote(data);refreshCurrentTab();updateHdrBadge();showSyncBanner('☁️ データを受信しました');}
+      if(data){
+        const hadActive=!!A.activeSession;
+        mergeRemote(data);
+        const hasActive=!!A.activeSession;
+        refreshCurrentTab();updateHdrBadge();
+        // セッション状態変化を通知
+        if(hadActive&&!hasActive){showSyncBanner('✅ セッションが終了されました');}
+        else if(!hadActive&&hasActive){showSyncBanner('🎮 セッションが開始されました');}
+        else{showSyncBanner('☁️ データを受信しました');}
+      }
       setSyncStatus('synced','同期済み');
     }
   },err=>{
@@ -683,6 +695,7 @@ function getCumulative(pid,year,month){
 function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=document.getElementById('sess-nav-dot');if(A.activeSession){badge.className='active-badge';badge.textContent='●セッション中';if(dot)dot.style.display='block';}else{badge.className='badge';badge.textContent='三人麻雀';if(dot)dot.style.display='none';}}
 function go(tab,btn){
   currentTab=tab;saveUI();
+  if(tab!=='session')removeStickyHeader();
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   document.getElementById('t-'+tab).classList.add('on');
   document.querySelectorAll('.nv').forEach(n=>n.classList.remove('on'));
@@ -980,7 +993,7 @@ function buildScoreTable(session,opts={}){
   });
   html+=`<tr class="total-row"><td style="text-align:center;font-size:10px">計</td>`;players.forEach(p=>{html+=`<td class="${ptTot[p.id]>=0?'pos':'neg'}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`;});
   html+=`</tr><tr class="chip-row"><td style="text-align:center">チップ</td>`;
-  players.forEach(p=>{const cv=parseInt(chips[String(p.id)])||0;const chipId=`chip-${session.id}-${p.id}`;if(showChipInput){if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" oninput="chipInput(${p.id},this.value)" onblur="chipBlur(${p.id},this.value)"></td>`;}else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="decimal" value="${cv||''}" placeholder="0" onchange="updateCompletedChip('${editSessId}',${p.id},this.value)"></td>`;}}else{html+=`<td class="${cv>=0?'':'neg'}">${cv>=0?'+':''}${cv}</td>`;}});
+  players.forEach(p=>{const cv=parseInt(chips[String(p.id)])||0;const chipId=`chip-${session.id}-${p.id}`;if(showChipInput){if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" value="${cv||''}" placeholder="0" oninput="chipInput(${p.id},this.value)" onblur="chipBlur(${p.id},this.value)"></td>`;}else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" value="${cv||''}" placeholder="0" onchange="updateCompletedChip('${editSessId}',${p.id},this.value)"></td>`;}}else{html+=`<td class="${cv>=0?'':'neg'}">${cv>=0?'+':''}${cv}</td>`;}});
   // ±ボタン行（入力時のみ表示）
   if(showChipInput){
     html+=`</tr><tr class="chip-row"><td style="text-align:center;font-size:9px;color:var(--sub)">±反転</td>`;
@@ -1055,6 +1068,44 @@ function renderActiveSession(el){
   <div style="margin-bottom:10px">
     <button class="btn btn-s" onclick="openAddMember()" style="font-size:13px">👤＋ 参加者を追加</button>
   </div>`;
+  setTimeout(initStickyHeader,120);
+}
+
+// ══ STICKY HEADER (JS clone approach - works with overflow-x:auto) ══
+function initStickyHeader(){
+  // Remove any existing sticky
+  const old=document.getElementById('sticky-score-header');if(old)old.remove();
+  const wrap=document.querySelector('.score-tbl-wrap');
+  const tbl=wrap?.querySelector('.score-tbl');
+  const thead=tbl?.querySelector('thead');
+  if(!wrap||!tbl||!thead)return;
+  // Build sticky element
+  const stickyEl=document.createElement('div');
+  stickyEl.id='sticky-score-header';
+  const cloneTbl=document.createElement('table');
+  cloneTbl.className='score-tbl';
+  cloneTbl.style.minWidth=tbl.style.minWidth;
+  cloneTbl.appendChild(thead.cloneNode(true));
+  stickyEl.appendChild(cloneTbl);
+  document.body.appendChild(stickyEl);
+  // Sync horizontal scroll
+  wrap.addEventListener('scroll',()=>{
+    cloneTbl.style.marginLeft=`-${wrap.scrollLeft}px`;
+  },{passive:true});
+  // Show/hide based on thead position
+  const HDR_H=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--hdr'))||52;
+  function updateSticky(){
+    const rect=thead.getBoundingClientRect();
+    stickyEl.style.display=(rect.bottom<HDR_H)?'block':'none';
+  }
+  window.addEventListener('scroll',updateSticky,{passive:true});
+  updateSticky();
+  // Cleanup when navigating away
+  stickyEl._cleanup=()=>{window.removeEventListener('scroll',updateSticky);};
+}
+function removeStickyHeader(){
+  const el=document.getElementById('sticky-score-header');
+  if(el){if(el._cleanup)el._cleanup();el.remove();}
 }
 
 // ══ SESSION START ══
@@ -1111,7 +1162,7 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>
-      <input class="sinput" type="number" id="gsc-${pid}" placeholder="0" step="1" inputmode="numeric" oninput="updateGamePreview()">
+      <input class="sinput" type="text" id="gsc-${pid}" placeholder="0" inputmode="numeric" oninput="updateGamePreview()">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
@@ -1160,8 +1211,24 @@ function endSession(){
   const chipSum=A.activeSession.players.reduce((a,pid)=>a+(parseInt(chips[String(pid)])||0),0);
   if(chipSum!==0){toast(`⚠ チップ合計が${chipSum>0?'+':''}${chipSum}です（合計0になるよう確認してください）`);return;}
   const note=document.getElementById('sess-note').value;
-  A.completedSessions.push({...A.activeSession,end:endDt,note});
-  A.activeSession=null;saveApp();closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
+  const sessId=A.activeSession.id;
+  function doEnd(){
+    A.completedSessions.push({...A.activeSession,end:endDt,note});
+    A.activeSession=null;saveApp();closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
+  }
+  if(fbDb&&fbReady){
+    // 他ユーザーが既に終了していないかFirebaseで確認
+    fbDb.ref(FB_PATH+'/activeSession/id').once('value',snap=>{
+      if(!snap.val()||snap.val()!==sessId){
+        toast('⚠ このセッションは既に他のユーザーが終了しました');
+        A.activeSession=null;closeModal('m-end-sess');updateHdrBadge();renderSession();
+        return;
+      }
+      doEnd();
+    });
+  } else {
+    doEnd();
+  }
 }
 
 // ══ SESSION DETAIL ══
@@ -1308,7 +1375,7 @@ function openEditGame(sessId,gameIdx){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>
-      <input class="sinput" type="number" id="egsc-${pid}" value="${pts}" step="1" inputmode="numeric">
+      <input class="sinput" type="text" id="egsc-${pid}" value="${pts}" inputmode="numeric">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
   document.getElementById('m-edit-game').classList.add('on');
