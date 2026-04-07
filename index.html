@@ -595,6 +595,8 @@ function loadUiState(){
 function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
 function mergeRemote(data){
   if(!data)return;
+  // FirebaseはnullフィールドをDBから削除するため、'activeSession'キーがなければnullとして扱う
+  if(!('activeSession' in data))data={...data,activeSession:null};
   A={...A,...data,settings:{...A.settings,...(data.settings||{})}};
   // 重複セッションを除去（IDが同じものは最初の1件だけ残す）
   const seen=new Set();
@@ -1346,6 +1348,7 @@ function endSession(){
         return;
       }
       // 自分が正常に終了できた → snapshotからローカル状態を更新
+      A.activeSession=null; // Firebaseはnull=削除のためスプレッドで消えないので明示的にクリア
       if(snap&&snap.val())mergeRemote(snap.val());
       closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');
     });
@@ -1767,24 +1770,23 @@ function dlBackup(){
   const gData=[["セッションID","局番","日時","P1_ID","P1_点数","P1_順位","P1_飛び","P2_ID","P2_点数","P2_順位","P2_飛び","P3_ID","P3_点数","P3_順位","P3_飛び"]];
   for(const s of A.completedSessions){if(!s||!Array.isArray(s.games))continue;s.games.forEach((game,idx)=>{const row=[s.id,idx+1,game[0]];(game[1]||[]).forEach(([pid,pts,rank,tobi])=>row.push(pid,pts,rank,tobi));while(row.length<15)row.push('');gData.push(row);});}
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gData),"対局");
-  // Sheet4: 元データ形式（一括インポートと同じ形式・人間が確認用）
-  const rawData=[];
+  // Sheet4: 元データ形式（全参加者をヘッダー1行・全行に日付）
+  const allP=allPlayers();
+  const rawData=[['日付','チップ',...allP.map(p=>p.name)]];
   const sortedSess=[...A.completedSessions].filter(s=>s&&s.start&&Array.isArray(s.players)&&Array.isArray(s.games)).sort((a,b)=>a.start.localeCompare(b.start));
   for(const s of sortedSess){
-    const players=(s.players||[]).map(pid=>playerById(pid));
     const chips=s.chips||{};
-    const dateStr=(s.start||'').slice(0,10).replace(/-/g,'/')+(s.end?` 〜 ${s.end.slice(0,10).replace(/-/g,'/')}`:'')+` (${s.games.length}局)`+(s.note?` [${s.note}]`:'');
-    // 日付ヘッダー行: 日付 | プレイヤー名...
-    rawData.push([dateStr,...players.map(p=>p.name)]);
-    // チップ行
-    rawData.push(['チップ',...players.map(p=>parseInt(chips[String(p.id)])||0)]);
-    // 対局行
+    const dateStr=(s.start||'').slice(0,10);
+    // 対局行: 日付 | 空 | 参加者のみスコア埋め・他は空
     for(const game of s.games){
-      const row=[''];
-      for(const p of players){const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;row.push(gp?gp[1]:'');}
+      const row=[dateStr,''];
+      for(const p of allP){const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;row.push(gp!=null?gp[1]:'');}
       rawData.push(row);
     }
-    rawData.push([]); // セッション間の空行
+    // チップ行: 日付 | チップ | 参加者のみチップ埋め・他は空
+    const chipRow=[dateStr,'チップ'];
+    for(const p of allP){chipRow.push(s.players.includes(p.id)?(parseInt(chips[String(p.id)])||0):'');}
+    rawData.push(chipRow);
   }
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rawData),'元データ形式');
   XLSX.writeFile(wb,`sanma-backup-${new Date().toISOString().slice(0,10)}.xlsx`);
