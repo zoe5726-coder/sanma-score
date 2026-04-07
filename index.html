@@ -1771,11 +1771,11 @@ function dlBackup(){
   XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(gData),"対局");
   // Sheet4: 元データ形式（一括インポートと同じ形式・人間が確認用）
   const rawData=[];
-  const sortedSess=[...A.completedSessions].sort((a,b)=>a.start.localeCompare(b.start));
+  const sortedSess=[...A.completedSessions].filter(s=>s&&s.start&&Array.isArray(s.players)&&Array.isArray(s.games)).sort((a,b)=>a.start.localeCompare(b.start));
   for(const s of sortedSess){
     const players=(s.players||[]).map(pid=>playerById(pid));
     const chips=s.chips||{};
-    const dateStr=(s.start||'').slice(0,10).replace(/-/g,'/')+(s.end?` 〜 ${s.end.slice(0,10).replace(/-/g,'/')}`:'')+` (${(s.games||[]).length}局)`+(s.note?` [${s.note}]`:'');
+    const dateStr=(s.start||'').slice(0,10).replace(/-/g,'/')+(s.end?` 〜 ${s.end.slice(0,10).replace(/-/g,'/')}`:'')+` (${s.games.length}局)`+(s.note?` [${s.note}]`:'');
     // 日付ヘッダー行: 日付 | プレイヤー名...
     rawData.push([dateStr,...players.map(p=>p.name)]);
     // チップ行
