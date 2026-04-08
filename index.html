@@ -198,7 +198,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </head>
 <body>
 <!-- ══ LOGIN SCREEN ══ -->
-<div id="login-screen" class="login-wrap">
+<div id="login-screen" class="login-wrap" style="display:none">
   <div class="login-logo">🀄</div>
   <div class="login-title">三麻スコア管理</div>
   <div class="login-sub">Googleアカウントでログインしてください。<br>アクセスには管理者の承認が必要です。</div>
@@ -943,7 +943,7 @@ function buildPartnerTable2(rows,isSelfTable,selfPid){
   const sfn=isSelfTable?'sortPartner1':'sortPartner0';
   const th=(col,label)=>`<th onclick="${sfn}('${col}')" style="cursor:pointer;user-select:none">${label}${sc===col?(sd?' ▼':' ▲'):''}</th>`;
   return`<table class="tbl2"><thead><tr>
-    ${th('name','名前')}${th('games','打')}${th('r1','1着')}${th('r2','2着')}${th('r3','3着')}${th('tobi','飛び')}${th('avgRank','平均着順')}${th('totalP','合計P')}${th('avgP','平均P')}
+    ${th('name','名前')}${th('games','打')}${th('r1','1着')}${th('r2','2着')}${th('r3','3着')}${th('tobi','飛び')}${th('avgRank','平均着順')}${th('pts','合計P')}${th('avgP','平均P')}
   </tr></thead><tbody>${rows.map(r=>{
     const _rid=('pid' in r)?r.pid:r.partId;const pp=playerById(_rid);const isSelf=selfPid!==undefined&&_rid===selfPid;
     const bgStyle=isSelf?'background:rgba(34,197,94,.08)':'';
@@ -956,8 +956,8 @@ function buildPartnerTable2(rows,isSelfTable,selfPid){
       <td>${r3}<div class="sub-val">${(r3/g*100).toFixed(1)}%</div></td>
       <td>${tobi}<div class="sub-val">${(tobi/g*100).toFixed(1)}%</div></td>
       <td>${r.avgRank.toFixed(3)}</td>
-      <td class="${r.totalP>=0?'pos':'neg'}">${r.totalP>=0?'+':''}${r.totalP.toFixed(0)}<div class="sub-val">${(r.chips||0)>=0?'+':''}${r.chips||0}c</div></td>
-      <td class="${r.avgP>=0?'pos':'neg'}">${r.avgP>=0?'+':''}${r.avgP.toFixed(2)}</td>
+      <td class="${r.pts>=0?'pos':'neg'}">${r.pts>=0?'+':''}${r.pts.toFixed(0)}</td>
+      <td class="${(r.games>0?r.pts/r.games:0)>=0?'pos':'neg'}">${(r.games>0?r.pts/r.games:0)>=0?'+':''}${(r.games>0?r.pts/r.games:0).toFixed(2)}</td>
     </tr>`;}).join('')}</tbody></table>`;
 }
 function sortPartner0(col){if(partnerSortCol0===col)partnerSortDesc0=!partnerSortDesc0;else{partnerSortCol0=col;partnerSortDesc0=col!=='avgRank'&&col!=='name';}renderPartnerContent();}
@@ -1015,7 +1015,7 @@ function buildScoreTable(session,opts={}){
   let html=`<table class="score-tbl" style="min-width:${minW}px"><thead><tr><th style="width:${showEditBtns?'72px':'44px'}">${showEditBtns?'管理':'局'}</th>${players.map(p=>`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`).join('')}</tr></thead><tbody>`;
   games.forEach((game,idx)=>{
     const time=game[0].length>10?game[0].slice(11,16):'';
-    if(showEditBtns){html+=`<tr><td style="text-align:center"><div style="font-size:9px;font-weight:600;margin-bottom:3px">${idx+1}</div><div class="game-admin-btns"><button class="gab" onclick="openEditGame('${editSessId}',${idx})">✏️</button><button class="gab del" onclick="deleteGame('${editSessId}',${idx})">🗑</button></div></td>`;}
+    if(showEditBtns){html+=`<tr><td style="text-align:center"><div style="font-size:9px;font-weight:600;margin-bottom:3px">${idx+1}</div><div class="game-admin-btns"><button class="gab" onclick="openEditGame('${editSessId}',${idx})">✏️</button><button class="gab del" onclick="deleteGame('${editSessId}',${idx})">🗑</button></div><div class="game-admin-btns" style="margin-top:2px"><button class="gab" onclick="moveGame('${editSessId}',${idx},-1)" ${idx===0?'disabled':''} style="opacity:${idx===0?'0.3':'1'}">↑</button><button class="gab" onclick="moveGame('${editSessId}',${idx},1)" ${idx===games.length-1?'disabled':''} style="opacity:${idx===games.length-1?'0.3':'1'}">↓</button></div></td>`;}
     else{html+=`<tr><td style="text-align:center"><div style="font-weight:600;font-size:10px">${idx+1}</div>${time?`<div style="font-size:9px;color:var(--sub)">${time}</div>`:''}</td>`;}
     players.forEach(p=>{const gp=Array.isArray(game[1])?game[1].find(x=>x[0]===p.id):null;if(!gp){html+=`<td style="color:var(--sf2)">—</td>`;}else{const em=gp[2]===1?'🥇':gp[2]===2?'🥈':'🥉';html+=`<td class="${gp[1]>=0?'pos':'neg'}"><span class="medal">${em}</span><span class="mscore">${gp[1]>=0?'+':''}${gp[1]}</span></td>`;}});
     html+=`</tr>`;
@@ -1202,6 +1202,11 @@ function startSession(){
 // ══ ADD GAME ══
 function openAddGame(){
   if(!A.activeSession)return;
+  // チップ入力を強制保存（フォーカスが外れていない状態でも値を保持）
+  A.activeSession.players.forEach(pid=>{
+    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
+    if(el)chipBlur(pid,el.value);
+  });
   // 参加者が3人の場合は全員を自動選択してスコア入力画面へ直接進む
   if(A.activeSession.players.length===3){
     sessGameSel=[...A.activeSession.players];
@@ -1611,6 +1616,16 @@ function deleteGame(sessId,gameIdx){
     else{const sess=A.completedSessions.find(x=>x.id===sessId);if(sess){sess.games.splice(gameIdx,1);saveApp();}closeModal('m-confirm');openSessDetail(sessId);}
     toast('削除しました');
   },'削除');
+}
+function moveGame(sessId,idx,dir){
+  const isActiveSess=A.activeSession&&A.activeSession.id===sessId;
+  if(!isActiveSess&&!isAdmin())return;
+  const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);
+  if(!sess||!Array.isArray(sess.games))return;
+  const ni=idx+dir;if(ni<0||ni>=sess.games.length)return;
+  [sess.games[idx],sess.games[ni]]=[sess.games[ni],sess.games[idx]];
+  saveApp();
+  if(isActiveSess)renderSession();else openSessDetail(sessId);
 }
 function setEditRemainder(pid){
   const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
