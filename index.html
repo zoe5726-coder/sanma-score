@@ -23,7 +23,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .np-val{flex:1;font-size:28px;font-weight:700;text-align:right;color:var(--tx);min-width:0}
 .np-abc{font-size:11px;color:var(--sub);padding:5px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--sf2);cursor:pointer;flex-shrink:0;white-space:nowrap;-webkit-tap-highlight-color:transparent}
 .np-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.npk{background:var(--sf2);border:1px solid var(--bd);border-radius:12px;padding:15px 8px;font-size:22px;font-weight:600;text-align:center;cursor:pointer;user-select:none;-webkit-user-select:none;color:var(--tx);-webkit-tap-highlight-color:transparent;transition:background .08s}
+.npk{background:var(--sf2);border:1px solid var(--bd);border-radius:12px;padding:15px 8px;font-size:22px;font-weight:600;text-align:center;cursor:pointer;user-select:none;-webkit-user-select:none;color:var(--tx);-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:background .08s}
 .npk:active,.npk.pressed{background:var(--bd)}
 .npk.np-neg{color:var(--gold)}
 .npk.np-del{font-size:17px}
@@ -1969,10 +1969,10 @@ function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t
 function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=document.getElementById('sess-nav-dot');if(A.activeSession){badge.className='active-badge';badge.textContent='●セッション中';if(dot)dot.style.display='block';}else{badge.className='badge';badge.textContent='三人麻雀';if(dot)dot.style.display='none';}}
 
 // ══ CUSTOM NUMPAD ══
-let _kbEl=null,_kbChangeFn=null,_kbBlurFn=null,_kbTouched=false;
+let _kbEl=null,_kbChangeFn=null,_kbBlurFn=null;
 function openNumpad(el,label,changeFn,blurFn){
   if(_kbBlurFn&&_kbEl)_kbBlurFn(_kbEl.value);
-  _kbEl=el;_kbChangeFn=changeFn||null;_kbBlurFn=blurFn||null;_kbTouched=false;
+  _kbEl=el;_kbChangeFn=changeFn||null;_kbBlurFn=blurFn||null;
   document.getElementById('np-label').textContent=label||'';
   document.getElementById('np-val').textContent=el.value||'';
   document.getElementById('numpad').classList.add('on');
@@ -1980,8 +1980,6 @@ function openNumpad(el,label,changeFn,blurFn){
 }
 function kbKey(k){
   if(!_kbEl)return;
-  if(_kbTouched){event&&event.preventDefault&&event.preventDefault();return;}
-  _kbTouched=true;setTimeout(()=>{_kbTouched=false;},300);
   let v=_kbEl.value;
   if(k==='⌫'){v=v.slice(0,-1);}
   else if(k==='-'){v=v.startsWith('-')?v.slice(1):(v?'-'+v:'-');}
@@ -2020,18 +2018,18 @@ initAuth();
     <span class="np-abc" onclick="kbSwitchText()">abc →</span>
   </div>
   <div class="np-grid">
-    <div class="npk" ontouchstart="kbKey('7')" onclick="kbKey('7')">7</div>
-    <div class="npk" ontouchstart="kbKey('8')" onclick="kbKey('8')">8</div>
-    <div class="npk" ontouchstart="kbKey('9')" onclick="kbKey('9')">9</div>
-    <div class="npk" ontouchstart="kbKey('4')" onclick="kbKey('4')">4</div>
-    <div class="npk" ontouchstart="kbKey('5')" onclick="kbKey('5')">5</div>
-    <div class="npk" ontouchstart="kbKey('6')" onclick="kbKey('6')">6</div>
-    <div class="npk" ontouchstart="kbKey('1')" onclick="kbKey('1')">1</div>
-    <div class="npk" ontouchstart="kbKey('2')" onclick="kbKey('2')">2</div>
-    <div class="npk" ontouchstart="kbKey('3')" onclick="kbKey('3')">3</div>
-    <div class="npk np-neg" ontouchstart="kbKey('-')" onclick="kbKey('-')">−</div>
-    <div class="npk" ontouchstart="kbKey('0')" onclick="kbKey('0')">0</div>
-    <div class="npk np-del" ontouchstart="kbKey('⌫')" onclick="kbKey('⌫')">⌫</div>
+    <div class="npk" onclick="kbKey('7')">7</div>
+    <div class="npk" onclick="kbKey('8')">8</div>
+    <div class="npk" onclick="kbKey('9')">9</div>
+    <div class="npk" onclick="kbKey('4')">4</div>
+    <div class="npk" onclick="kbKey('5')">5</div>
+    <div class="npk" onclick="kbKey('6')">6</div>
+    <div class="npk" onclick="kbKey('1')">1</div>
+    <div class="npk" onclick="kbKey('2')">2</div>
+    <div class="npk" onclick="kbKey('3')">3</div>
+    <div class="npk np-neg" onclick="kbKey('-')">−</div>
+    <div class="npk" onclick="kbKey('0')">0</div>
+    <div class="npk np-del" onclick="kbKey('⌫')">⌫</div>
     <div class="npk np-ok" onclick="kbOK()">OK</div>
   </div>
 </div>
