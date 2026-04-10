@@ -462,7 +462,7 @@ const PCOLORS=["#22c55e","#3b82f6","#f59e0b","#ef4444","#a855f7","#14b8a6","#f97
 let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234'}};
 let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true;
 let homeYear='all',homeMonth='all';
-let playerYear='all',playerMonth='all',selPid=0,partnerView=0,pairView=0;
+let playerYear='all',playerMonth='all',selPid=0,partnerView=0,pairView=0,pairSortCol='pts',pairSortDesc=true;
 let partnerSortCol0='totalP',partnerSortDesc0=true;
 let partnerSortCol1='games',partnerSortDesc1=true;
 let currentTab='home';
@@ -881,7 +881,6 @@ function renderPlayerContent(){
     <div id="partner-content"></div>
   </div>
   <div class="card"><div class="ctitle">👥 同卓ペア別ランキング</div>
-    <div class="sub-tabs"><button class="stbtn${pairView===0?' on':''}" id="pair-tab-0" onclick="setPairView(0)">👑 TOP30 良い</button><button class="stbtn${pairView===1?' on':''}" id="pair-tab-1" onclick="setPairView(1)">💀 TOP30 悪い</button></div>
     <div id="pair-content"></div>
   </div>`;
   setTimeout(()=>{
@@ -982,11 +981,10 @@ function buildPartnerTable2(rows,isSelfTable,selfPid){
 }
 function sortPartner0(col){if(partnerSortCol0===col)partnerSortDesc0=!partnerSortDesc0;else{partnerSortCol0=col;partnerSortDesc0=col!=='avgRank'&&col!=='name';}renderPartnerContent();}
 function sortPartner1(col){if(partnerSortCol1===col)partnerSortDesc1=!partnerSortDesc1;else{partnerSortCol1=col;partnerSortDesc1=col!=='avgRank'&&col!=='name';}renderPartnerContent();}
-function setPairView(v){
-  pairView=v;
+function sortPair(col){
+  if(pairSortCol===col)pairSortDesc=!pairSortDesc;
+  else{pairSortCol=col;pairSortDesc=col!=='avgRank';}
   const savedY=window.scrollY;
-  document.getElementById('pair-tab-0')?.classList.toggle('on',v===0);
-  document.getElementById('pair-tab-1')?.classList.toggle('on',v===1);
   renderPairContent();
   requestAnimationFrame(()=>window.scrollTo(0,savedY));
 }
@@ -1004,21 +1002,36 @@ function renderPairContent(){
     const others=g[1].filter(p=>p[0]!==pid).map(p=>p[0]).sort((a,b)=>a-b);
     if(others.length!==2)continue;
     const key=others.join(',');
-    if(!pairMap[key])pairMap[key]={ids:others,games:0,pts:0};
+    if(!pairMap[key])pairMap[key]={ids:others,games:0,pts:0,r1:0,r2:0,r3:0,tobi:0};
     pairMap[key].games++;pairMap[key].pts+=me[1];
+    if(me[2]===1)pairMap[key].r1++;else if(me[2]===2)pairMap[key].r2++;else if(me[2]===3)pairMap[key].r3++;
+    if(me[3])pairMap[key].tobi++;
   }
-  let rows=Object.entries(pairMap).map(([,d])=>({...d,avgP:d.games>0?d.pts/d.games:0}));
-  rows.sort((a,b)=>pairView===0?b.pts-a.pts:a.pts-b.pts);
+  let rows=Object.entries(pairMap).map(([,d])=>{
+    const g=d.games||1;
+    return{...d,avgP:d.pts/g,avgRank:d.games>0?(d.r1+d.r2*2+d.r3*3)/d.games:0};
+  });
+  if(pairSortCol==='avgRank')rows.sort((a,b)=>pairSortDesc?b.avgRank-a.avgRank:a.avgRank-b.avgRank);
+  else rows.sort((a,b)=>pairSortDesc?b[pairSortCol]-a[pairSortCol]:a[pairSortCol]-b[pairSortCol]);
   rows=rows.slice(0,30);
   if(!rows.length){el.innerHTML='<div style="font-size:12px;color:var(--sub);text-align:center;padding:8px">データがありません</div>';return;}
-  let html=`<table class="tbl2" style="width:100%"><thead><tr><th style="text-align:left;font-size:11px">組み合わせ</th><th style="font-size:11px">局数</th><th style="font-size:11px">合計P</th><th style="font-size:11px">平均P</th></tr></thead><tbody>`;
+  const th=(col,label)=>`<th onclick="sortPair('${col}')" style="cursor:pointer;user-select:none;white-space:nowrap">${label}${pairSortCol===col?(pairSortDesc?' ▼':' ▲'):''}</th>`;
+  let html=`<table class="tbl2"><thead><tr>
+    <th style="text-align:left">組み合わせ</th>${th('games','打')}${th('r1','1着')}${th('r2','2着')}${th('r3','3着')}${th('tobi','飛び')}${th('avgRank','平均着順')}${th('pts','合計P')}${th('avgP','平均P')}
+  </tr></thead><tbody>`;
   rows.forEach((r,i)=>{
     const p1=playerById(r.ids[0]),p2=playerById(r.ids[1]);
     const n1=p1?esc(p1.name):'?',c1=p1?p1.color:'var(--tx)';
     const n2=p2?esc(p2.name):'?',c2=p2?p2.color:'var(--tx)';
+    const g=r.games||1;
     html+=`<tr>
-      <td><span style="font-size:10px;color:var(--sub)">#${i+1}</span> <span style="color:${c1};font-weight:700;font-size:12px">${n1}</span><span style="color:var(--sub);font-size:10px"> & </span><span style="color:${c2};font-weight:700;font-size:12px">${n2}</span></td>
-      <td style="text-align:center">${r.games}</td>
+      <td style="white-space:nowrap"><div style="display:flex;align-items:baseline;gap:4px"><span style="font-size:10px;color:var(--sub);flex-shrink:0">#${i+1}</span><div><div style="color:${c1};font-weight:700;font-size:12px">${n1}</div><div style="color:${c2};font-weight:700;font-size:12px">${n2}</div></div></div></td>
+      <td>${r.games}</td>
+      <td>${r.r1}<div class="sub-val">${(r.r1/g*100).toFixed(1)}%</div></td>
+      <td>${r.r2}<div class="sub-val">${(r.r2/g*100).toFixed(1)}%</div></td>
+      <td>${r.r3}<div class="sub-val">${(r.r3/g*100).toFixed(1)}%</div></td>
+      <td>${r.tobi}<div class="sub-val">${(r.tobi/g*100).toFixed(1)}%</div></td>
+      <td>${r.avgRank.toFixed(3)}</td>
       <td class="${r.pts>=0?'pos':'neg'}">${r.pts>=0?'+':''}${r.pts.toFixed(0)}</td>
       <td class="${r.avgP>=0?'pos':'neg'}">${r.avgP>=0?'+':''}${r.avgP.toFixed(2)}</td>
     </tr>`;
