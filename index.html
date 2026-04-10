@@ -1007,7 +1007,7 @@ function renderPairContent(){
     if(me[2]===1)pairMap[key].r1++;else if(me[2]===2)pairMap[key].r2++;else if(me[2]===3)pairMap[key].r3++;
     if(me[3])pairMap[key].tobi++;
   }
-  let rows=Object.entries(pairMap).filter(([,d])=>d.games>20).map(([,d])=>{
+  let rows=Object.entries(pairMap).filter(([,d])=>d.games>10).map(([,d])=>{
     const g=d.games||1;
     return{...d,avgP:d.pts/g,avgRank:d.games>0?(d.r1+d.r2*2+d.r3*3)/d.games:0};
   });
