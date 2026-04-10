@@ -462,7 +462,7 @@ const PCOLORS=["#22c55e","#3b82f6","#f59e0b","#ef4444","#a855f7","#14b8a6","#f97
 let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234'}};
 let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true;
 let homeYear='all',homeMonth='all';
-let playerYear='all',playerMonth='all',selPid=0,partnerView=0;
+let playerYear='all',playerMonth='all',selPid=0,partnerView=0,pairView=0;
 let partnerSortCol0='totalP',partnerSortDesc0=true;
 let partnerSortCol1='games',partnerSortDesc1=true;
 let currentTab='home';
@@ -877,8 +877,12 @@ function renderPlayerContent(){
   <div class="card"><div class="ctitle">📈 累計ポイント推移</div><div class="ch2"><canvas id="trend-chart"></canvas></div></div>
   <div class="card"><div class="ctitle">📅 セッション別スコア</div><div id="p-sessions"></div></div>
   <div class="card"><div class="ctitle">🤝 同卓分析</div>
-    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
+    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" id="partner-tab-0" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" id="partner-tab-1" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
     <div id="partner-content"></div>
+  </div>
+  <div class="card"><div class="ctitle">👥 同卓ペア別ランキング</div>
+    <div class="sub-tabs"><button class="stbtn${pairView===0?' on':''}" id="pair-tab-0" onclick="setPairView(0)">👑 TOP30 良い</button><button class="stbtn${pairView===1?' on':''}" id="pair-tab-1" onclick="setPairView(1)">💀 TOP30 悪い</button></div>
+    <div id="pair-content"></div>
   </div>`;
   setTimeout(()=>{
     if(chart1){chart1.destroy();chart1=null;}
@@ -887,6 +891,7 @@ function renderPlayerContent(){
     chart1=new Chart(ctx,{type:'line',data:{labels:pts.map(d=>d.date.slice(5)),datasets:[{data:pts.map(d=>d.cum),borderColor:p.color,backgroundColor:p.color+'22',fill:true,tension:.3,pointRadius:pts.length>50?0:3,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>`${c.parsed.y>=0?'+':''}${c.parsed.y.toFixed(2)}P`}}},scales:{x:{ticks:{color:'#94a3b8',font:{size:9},maxTicksLimit:8},grid:{color:'#334155'}},y:{ticks:{color:'#94a3b8',font:{size:9},callback:v=>(v>=0?'+':'')+v.toFixed(0)+'P'},grid:{color:'#334155'}}}}});
     renderPlayerSessions();
     renderPartnerContent();
+    renderPairContent();
   },60);
 }
 function setPartnerView(v){
@@ -894,7 +899,8 @@ function setPartnerView(v){
   // タブボタンだけ更新してスクロール位置を保持
   const savedY=window.scrollY;
   // サブタブのon状態を切り替え
-  document.querySelectorAll('.stbtn').forEach((btn,i)=>btn.classList.toggle('on',i===v));
+  document.getElementById('partner-tab-0')?.classList.toggle('on',v===0);
+  document.getElementById('partner-tab-1')?.classList.toggle('on',v===1);
   // パートナーコンテンツだけ更新（全体再描画しない）
   renderPartnerContent();
   // チャートが再描画される前なのでスクロール位置を維持
@@ -976,6 +982,50 @@ function buildPartnerTable2(rows,isSelfTable,selfPid){
 }
 function sortPartner0(col){if(partnerSortCol0===col)partnerSortDesc0=!partnerSortDesc0;else{partnerSortCol0=col;partnerSortDesc0=col!=='avgRank'&&col!=='name';}renderPartnerContent();}
 function sortPartner1(col){if(partnerSortCol1===col)partnerSortDesc1=!partnerSortDesc1;else{partnerSortCol1=col;partnerSortDesc1=col!=='avgRank'&&col!=='name';}renderPartnerContent();}
+function setPairView(v){
+  pairView=v;
+  const savedY=window.scrollY;
+  document.getElementById('pair-tab-0')?.classList.toggle('on',v===0);
+  document.getElementById('pair-tab-1')?.classList.toggle('on',v===1);
+  renderPairContent();
+  requestAnimationFrame(()=>window.scrollTo(0,savedY));
+}
+function renderPairContent(){
+  const pid=selPid;
+  const el=document.getElementById('pair-content');if(!el)return;
+  const opts={};if(playerYear!=='all')opts.year=playerYear;if(playerMonth!=='all')opts.month=playerMonth;
+  let filtered=allGames();
+  if(opts.year)filtered=filtered.filter(g=>g[0].startsWith(opts.year));
+  if(opts.month)filtered=filtered.filter(g=>g[0].startsWith(`${opts.year}-${opts.month}`));
+  filtered=filtered.filter(g=>g[1].some(p=>p[0]===pid)&&g[1].length===3);
+  const pairMap={};
+  for(const g of filtered){
+    const me=g[1].find(p=>p[0]===pid);if(!me)continue;
+    const others=g[1].filter(p=>p[0]!==pid).map(p=>p[0]).sort((a,b)=>a-b);
+    if(others.length!==2)continue;
+    const key=others.join(',');
+    if(!pairMap[key])pairMap[key]={ids:others,games:0,pts:0};
+    pairMap[key].games++;pairMap[key].pts+=me[1];
+  }
+  let rows=Object.entries(pairMap).map(([,d])=>({...d,avgP:d.games>0?d.pts/d.games:0}));
+  rows.sort((a,b)=>pairView===0?b.pts-a.pts:a.pts-b.pts);
+  rows=rows.slice(0,30);
+  if(!rows.length){el.innerHTML='<div style="font-size:12px;color:var(--sub);text-align:center;padding:8px">データがありません</div>';return;}
+  let html=`<table class="tbl2" style="width:100%"><thead><tr><th style="text-align:left;font-size:11px">組み合わせ</th><th style="font-size:11px">局数</th><th style="font-size:11px">合計P</th><th style="font-size:11px">平均P</th></tr></thead><tbody>`;
+  rows.forEach((r,i)=>{
+    const p1=playerById(r.ids[0]),p2=playerById(r.ids[1]);
+    const n1=p1?esc(p1.name):'?',c1=p1?p1.color:'var(--tx)';
+    const n2=p2?esc(p2.name):'?',c2=p2?p2.color:'var(--tx)';
+    html+=`<tr>
+      <td><span style="font-size:10px;color:var(--sub)">#${i+1}</span> <span style="color:${c1};font-weight:700;font-size:12px">${n1}</span><span style="color:var(--sub);font-size:10px"> & </span><span style="color:${c2};font-weight:700;font-size:12px">${n2}</span></td>
+      <td style="text-align:center">${r.games}</td>
+      <td class="${r.pts>=0?'pos':'neg'}">${r.pts>=0?'+':''}${r.pts.toFixed(0)}</td>
+      <td class="${r.avgP>=0?'pos':'neg'}">${r.avgP>=0?'+':''}${r.avgP.toFixed(2)}</td>
+    </tr>`;
+  });
+  html+=`</tbody></table>`;
+  el.innerHTML=html;
+}
 function renderPartnerContent(){
   const pid=selPid,opts={};if(playerYear!=='all')opts.year=playerYear;if(playerMonth!=='all')opts.month=playerMonth;
   const el=document.getElementById('partner-content');if(!el)return;
