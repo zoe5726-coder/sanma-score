@@ -1351,13 +1351,22 @@ function buildGameScoreInputs(){
 }
 function updateGamePreview(){
   const vals=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;return{pid,pts:v&&v!==''?parseInt(v):null};});
-  const ok=vals.every(v=>v.pts!==null);const el=document.getElementById('game-preview');
-  const filledPts=vals.filter(v=>v.pts!==null).map(v=>v.pts);const partialSum=filledPts.reduce((a,b)=>a+b,0);
+  // 2人入力済みで残り1人が空なら自動入力
+  const emptyVals=vals.filter(v=>v.pts===null);
+  const filledVals=vals.filter(v=>v.pts!==null);
+  if(emptyVals.length===1&&filledVals.length===2){
+    const sum=filledVals.reduce((a,v)=>a+v.pts,0);
+    const autoEl=document.getElementById('gsc-'+emptyVals[0].pid);
+    if(autoEl){autoEl.value=String(-sum);kbSync(autoEl);}
+  }
+  const vals2=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;return{pid,pts:v&&v!==''?parseInt(v):null};});
+  const ok=vals2.every(v=>v.pts!==null);const el=document.getElementById('game-preview');
+  const filledPts=vals2.filter(v=>v.pts!==null).map(v=>v.pts);const partialSum=filledPts.reduce((a,b)=>a+b,0);
   const sumColor=ok?(partialSum===0?'var(--ac)':'var(--red)'):'var(--sub)';
   const sumHtml=`<div style="font-size:11px;text-align:right;padding:4px 0;color:${sumColor}">合計: ${partialSum}${ok&&partialSum!==0?' ⚠ 0にしてください':ok?' ✓':''}</div>`;
   if(ok){
     if(partialSum!==0){el.innerHTML=`<p style="color:var(--red);font-size:12px;text-align:center;padding:6px 0">⚠ 合計が0になっていません</p>${sumHtml}`;document.getElementById('game-save-btn').disabled=true;return;}
-    const res=directPts(vals);
+    const res=directPts(vals2);
     el.innerHTML=res.map(r=>{const p=playerById(r.pid);const em=r.rank===1?'🥇':r.rank===2?'🥈':'🥉';return`<div class="prev-row"><div class="prev-left">${em}<div style="width:7px;height:7px;border-radius:50%;background:${p.color}"></div>${esc(p.name)}</div><div><span class="${r.pts>=0?'pos':'neg'}" style="font-weight:700">${r.pts>=0?'+':''}${r.pts}pt</span></div></div>`;}).join('')+sumHtml;
     document.getElementById('game-save-btn').disabled=false;
   } else {el.innerHTML=`<p style="color:var(--sub);font-size:12px;text-align:center;padding:6px 0">全員のポイントを入力</p>${filledPts.length>0?sumHtml:''}`;document.getElementById('game-save-btn').disabled=true;}
