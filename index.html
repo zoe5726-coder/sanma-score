@@ -140,8 +140,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .score-tbl .mscore{display:block;font-size:11px;line-height:1.2}
 .score-tbl .total-row td{background:var(--sf2);font-weight:700;font-size:12px;border-top:2px solid var(--bd)}
 .score-tbl .total-row td:first-child{background:var(--sf2)}
-.score-tbl .totalp-row td{background:rgba(34,197,94,.08);font-weight:700;font-size:12px}
-.score-tbl .totalp-row td:first-child{background:rgba(34,197,94,.08)}
+.score-tbl .totalp-row td{background:#1e353e;font-weight:700;font-size:12px}
+.score-tbl .totalp-row td:first-child{background:#1e353e}
 .score-tbl .chip-row td{background:var(--sf2);font-size:11px}
 .score-tbl .chip-row td:first-child{background:var(--sf2);color:var(--sub);font-size:10px}
 .chip-inp{width:52px;background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:4px;color:var(--tx);font-size:12px;text-align:center;outline:none}
@@ -1350,7 +1350,7 @@ function buildGameScoreInputs(){
   updateGamePreview();
 }
 function updateGamePreview(){
-  const vals=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;return{pid,pts:v&&v!==''?parseInt(v):null};});
+  const vals=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
   // 2人入力済みで残り1人が空なら自動入力
   const emptyVals=vals.filter(v=>v.pts===null);
   const filledVals=vals.filter(v=>v.pts!==null);
@@ -1359,7 +1359,7 @@ function updateGamePreview(){
     const autoEl=document.getElementById('gsc-'+emptyVals[0].pid);
     if(autoEl){autoEl.value=String(-sum);kbSync(autoEl);}
   }
-  const vals2=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;return{pid,pts:v&&v!==''?parseInt(v):null};});
+  const vals2=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
   const ok=vals2.every(v=>v.pts!==null);const el=document.getElementById('game-preview');
   const filledPts=vals2.filter(v=>v.pts!==null).map(v=>v.pts);const partialSum=filledPts.reduce((a,b)=>a+b,0);
   const sumColor=ok?(partialSum===0?'var(--ac)':'var(--red)'):'var(--sub)';
