@@ -1344,14 +1344,13 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>
-      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)}',()=>updateGamePreview(),null)">
+      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)}',()=>updateGamePreview(),()=>{autoFillLastScore();updateGamePreview();})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
 }
-function updateGamePreview(){
+function autoFillLastScore(){
   const vals=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
-  // 2人入力済みで残り1人が空なら自動入力
   const emptyVals=vals.filter(v=>v.pts===null);
   const filledVals=vals.filter(v=>v.pts!==null);
   if(emptyVals.length===1&&filledVals.length===2){
@@ -1359,6 +1358,8 @@ function updateGamePreview(){
     const autoEl=document.getElementById('gsc-'+emptyVals[0].pid);
     if(autoEl){autoEl.value=String(-sum);kbSync(autoEl);}
   }
+}
+function updateGamePreview(){
   const vals2=sessGameSel.map(pid=>{const v=document.getElementById('gsc-'+pid)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
   const ok=vals2.every(v=>v.pts!==null);const el=document.getElementById('game-preview');
   const filledPts=vals2.filter(v=>v.pts!==null).map(v=>v.pts);const partialSum=filledPts.reduce((a,b)=>a+b,0);
