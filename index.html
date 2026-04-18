@@ -70,8 +70,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .period-bar::-webkit-scrollbar{display:none}
 .pbtn{padding:5px 12px;border-radius:16px;border:1px solid var(--bd);background:var(--sf);color:var(--sub);font-size:12px;cursor:pointer;white-space:nowrap;transition:all .2s;flex-shrink:0}
 .pbtn.on{background:var(--ac);color:#000;border-color:var(--ac);font-weight:600}
-.month-sel{width:auto;background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:5px 14px;color:var(--tx);font-size:12px;cursor:pointer;outline:none;margin:6px 14px 4px}
-#month-bar .month-sel{margin:0}
+.month-sel,.year-sel{width:auto;background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:5px 14px;color:var(--tx);font-size:12px;cursor:pointer;outline:none;margin:6px 14px 4px}
+#month-bar .month-sel,.period-bar .year-sel{margin:0}
 /* ── HOME ── */
 .hgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
 .scard{background:var(--sf);border-radius:12px;padding:14px;border:1px solid var(--bd);text-align:center}
@@ -105,8 +105,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sub-val{font-size:9px;color:var(--sub);margin-top:1px}
 /* ── PLAYER DD ── */
 .player-dd-wrap{position:relative;margin-bottom:8px}
-.player-dd{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:10px;padding:11px 38px 11px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;-webkit-appearance:none;appearance:none;cursor:pointer;transition:border-color .2s}
-.player-dd option{background:var(--sf);color:var(--tx)}.player-dd-arrow{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--sub);font-size:13px}
+.player-dd{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:10px;padding:11px 38px 11px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;cursor:text;transition:border-color .2s}
+.player-dd-arrow{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--sub);font-size:13px}
+.player-suggestions{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--sf);border:1px solid var(--bd);border-radius:10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6);display:none}
+.player-sug-item{padding:11px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;border-bottom:1px solid var(--bd);touch-action:manipulation}
+.player-sug-item:last-child{border-bottom:none}
+.player-sug-item:active,.player-sug-item.hover{background:var(--sf2)}
 /* ── INDIVIDUAL PLAYER ── */
 .sgrid4{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:10px}
 .si{background:var(--sf2);border-radius:10px;padding:10px 5px;text-align:center}
@@ -276,8 +280,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <div id="t-player" class="tab">
   <div class="px" style="margin-top:6px;padding-bottom:0">
     <div class="player-dd-wrap">
-      <select class="player-dd" id="player-dd" onchange="selPlayer(Number(this.value))"></select>
+      <input type="text" class="player-dd" id="player-search" autocomplete="off" placeholder="プレイヤーを選択..." oninput="filterPlayerDD()" onfocus="openPlayerDD()" onblur="closePlayerDD()">
       <div class="player-dd-arrow">▼</div>
+      <div class="player-suggestions" id="player-suggestions"></div>
     </div>
   </div>
   <div class="period-bar" id="p-year-bar"></div>
@@ -735,6 +740,8 @@ function getCumulative(pid,year,month){
 // ══ NAV / TAB ══
 function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=document.getElementById('sess-nav-dot');if(A.activeSession){badge.className='active-badge';badge.textContent='●セッション中';if(dot)dot.style.display='block';}else{badge.className='badge';badge.textContent='三人麻雀';if(dot)dot.style.display='none';}}
 function go(tab,btn){
+  // 数値パッドが開いていたらOKして保存
+  const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();
   currentTab=tab;saveUI();
   if(tab!=='session')removeStickyHeader();
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
@@ -748,16 +755,20 @@ function go(tab,btn){
   else if(tab==='settings')renderSettings();
 }
 function buildYearBar(yBid,mBid,onYear,onMonth){
-  const years=['all','2023','2024','2025','2026'];
   const yBar=document.getElementById(yBid),mBar=document.getElementById(mBid);if(!yBar||!mBar)return;
   const fn=id=>id.replace(/-/g,'_');
   let curY,curM;
   if(yBid==='home-year-bar'){curY=homeYear;curM=homeMonth;}else if(yBid.startsWith('p-')){curY=playerYear;curM=playerMonth;}else{curY=statsYear;curM=statsMonth;}
-  yBar.innerHTML=years.map(y=>`<button class="pbtn${y===curY?' on':''}" onclick="window['setY_${fn(yBid)}']('${y}')">${y==='all'?'全体':y+'年'}</button>`).join('');
-  const mBarShow=mBid==='month-bar'?'flex':'block';
+  // 実データから年リストを動的生成
+  const yearSet=new Set(['all']);
+  allGames().forEach(g=>{const y=g[0].slice(0,4);if(y)yearSet.add(y);});
+  if(A.activeSession?.start)yearSet.add(A.activeSession.start.slice(0,4));
+  const years=[...yearSet].sort();
   window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);};
   const months=['all','01','02','03','04','05','06','07','08','09','10','11','12'];
   window[`setM_${fn(mBid)}`]=(m)=>{onMonth(m);buildYearBar(yBid,mBid,onYear,onMonth);};
+  yBar.innerHTML=`<select class="year-sel" onchange="window['setY_${fn(yBid)}'](this.value)">${years.map(y=>`<option value="${y}"${y===curY?' selected':''}>${y==='all'?'全期間':y+'年'}</option>`).join('')}</select>`;
+  const mBarShow=mBid==='month-bar'?'flex':'block';
   mBar.style.display=mBarShow;
   mBar.innerHTML=`<select class="month-sel" onchange="window['setM_${fn(mBid)}'](this.value)">${months.map(m=>`<option value="${m}"${m===curM?' selected':''}>${m==='all'?'全月':parseInt(m)+'月'}</option>`).join('')}</select>`;
 }
@@ -834,14 +845,49 @@ function renderStatsTable(){
 function sortStats(col){if(sortCol===col)sortDesc=!sortDesc;else{sortCol=col;sortDesc=col!=='avgRank';}renderStatsTable();}
 
 // ══ PLAYER INDIVIDUAL ══
+let _playerDDList=[];
 function renderPlayerSelector(){
-  const st=computeStats();const players=allPlayers().filter(p=>st[p.id]&&st[p.id].games>0);
-  if(!players.length)return;if(!players.find(p=>p.id===selPid))selPid=players[0].id;
-  const dd=document.getElementById('player-dd');if(!dd)return;
-  dd.innerHTML=players.map(p=>`<option value="${p.id}"${p.id===selPid?' selected':''}>${esc(p.name)}</option>`).join('');
-  const cur=playerById(selPid);dd.style.borderColor=cur.color;dd.style.color=cur.color;
+  const st=computeStats();_playerDDList=allPlayers().filter(p=>st[p.id]&&st[p.id].games>0);
+  if(!_playerDDList.length)return;if(!_playerDDList.find(p=>p.id===selPid))selPid=_playerDDList[0].id;
+  const input=document.getElementById('player-search');if(!input)return;
+  const cur=playerById(selPid);input.value=cur.name;input.style.borderColor=cur.color;input.style.color=cur.color;
 }
-function selPlayer(pid){selPid=pid;partnerView=0;saveUI();const dd=document.getElementById('player-dd');if(dd){const cur=playerById(pid);dd.style.borderColor=cur.color;dd.style.color=cur.color;}renderPlayerContent();}
+function openPlayerDD(){
+  const input=document.getElementById('player-search');if(!input)return;
+  input.select();
+  _renderPlayerSuggestions(_playerDDList);
+  document.getElementById('player-suggestions').style.display='block';
+}
+function closePlayerDD(){
+  setTimeout(()=>{
+    const el=document.getElementById('player-suggestions');if(el)el.style.display='none';
+    const input=document.getElementById('player-search');
+    if(input){const cur=playerById(selPid);input.value=cur.name;input.style.color=cur.color;input.style.borderColor=cur.color;}
+  },200);
+}
+function filterPlayerDD(){
+  const q=(document.getElementById('player-search')?.value||'').toLowerCase();
+  const filtered=_playerDDList.filter(p=>p.name.toLowerCase().includes(q));
+  _renderPlayerSuggestions(filtered);
+  document.getElementById('player-suggestions').style.display='block';
+}
+function _renderPlayerSuggestions(players){
+  const el=document.getElementById('player-suggestions');if(!el)return;
+  el.innerHTML=players.length
+    ?players.map(p=>`<div class="player-sug-item" onmousedown="selectPlayerDD(${p.id})"><div style="width:9px;height:9px;border-radius:50%;background:${p.color};flex-shrink:0"></div><span style="color:${p.color}">${esc(p.name)}</span></div>`).join('')
+    :'<div style="padding:10px 14px;color:var(--sub);font-size:13px">見つかりません</div>';
+}
+function selectPlayerDD(pid){
+  selPlayer(pid);
+  document.getElementById('player-suggestions').style.display='none';
+}
+function selPlayer(pid){
+  selPid=pid;partnerView=0;saveUI();
+  const cur=playerById(pid);
+  const input=document.getElementById('player-search');
+  if(input){input.value=cur.name;input.style.borderColor=cur.color;input.style.color=cur.color;}
+  renderPlayerContent();
+}
 function renderPlayerContent(){
   const pid=selPid,p=playerById(pid);
   const opts={};if(playerYear!=='all')opts.year=playerYear;if(playerMonth!=='all')opts.month=playerMonth;
@@ -1115,7 +1161,7 @@ function buildScoreTable(session,opts={}){
   const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=(isActive&&!chipReadOnly)||(editable&&isAdmin());
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>{if(!Array.isArray(g[1]))return;g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;});});
-  const minW=Math.max(280,80+players.length*70);
+  const firstColPx=showEditBtns?72:44;const minW=Math.max(280,firstColPx+players.length*70);
   let html=`<table class="score-tbl" style="min-width:${minW}px"><thead><tr><th style="width:${showEditBtns?'72px':'44px'}">${showEditBtns?'管理':'局'}</th>${players.map(p=>`<th><div class="pname-cell" style="justify-content:center"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></th>`).join('')}</tr></thead><tbody>`;
   games.forEach((game,idx)=>{
     const time=game[0].length>10?game[0].slice(11,16):'';
