@@ -1267,7 +1267,7 @@ function renderSession(){const el=document.getElementById('sess-content');if(A.a
 function renderNoSession(el){
   const completed=[...A.completedSessions].filter(s=>s&&s.start&&Array.isArray(s.games)&&Array.isArray(s.players)).sort((a,b)=>b.start.localeCompare(a.start));
   el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
-    <div style="font-size:42px;margin-bottom:10px">🎮</div>
+    <div style="margin-bottom:10px;display:flex;justify-content:center"><svg width="54" height="54" viewBox="0 0 54 54" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="27" cy="48" rx="6" ry="3" fill="#2a1008"/><rect x="24.5" y="38" width="5" height="11" rx="1.5" fill="#3a1a08"/><path d="M5 25 L5 33 L27 39 L27 31 Z" fill="#6b3010"/><path d="M49 25 L49 33 L27 39 L27 31 Z" fill="#4a2008"/><path d="M5 25 L27 17 L49 25 L27 33 Z" fill="#8b4513"/><path d="M10 25 L27 18.5 L44 25 L27 31.5 Z" fill="#267040"/><path d="M10 25 L27 31.5 L27 33 L10 26.5 Z" fill="#1c5030"/><path d="M44 25 L27 31.5 L27 33 L44 26.5 Z" fill="#163f26"/><ellipse cx="27" cy="25" rx="4.5" ry="2.5" fill="#f2ece0" opacity=".95"/><circle cx="25" cy="24.8" r="1" fill="#777"/><circle cx="29" cy="24.8" r="1" fill="#777"/></svg></div>
     <p style="color:var(--sub);font-size:13px;margin-bottom:16px">セッションを開始して対局を記録しましょう</p>
     <button class="btn btn-p" onclick="openStartSession()" style="margin-bottom:8px">セッションを開始</button>
     ${isAdmin()?`<button class="btn btn-s" onclick="openBulkImport()">📋 一括セッション登録</button>`:''}
