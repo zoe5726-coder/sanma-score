@@ -371,7 +371,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div></div>
 <div class="overlay" id="m-edit-game"><div class="modal">
   <div class="mtitle">対局を編集</div>
-  <div style="font-size:11px;color:var(--sub);margin-bottom:8px;text-align:center">ポイントを修正してください</div>
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <button id="esmb-pts" class="ftbtn on" onclick="setEditScoreMode('pts')" style="flex:1">スコア入力</button>
+    <button id="esmb-raw" class="ftbtn" onclick="setEditScoreMode('raw')" style="flex:1">素点入力</button>
+  </div>
   <div id="edit-game-inputs"></div>
   <div class="mact">
     <button class="btn btn-s" onclick="closeModal('m-edit-game')">キャンセル</button>
@@ -488,7 +491,7 @@ function togglePreviewMode(){
 }
 let chart1=null,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
 let scoreInputMode='pts'; // 'pts'=スコア直接入力 / 'raw'=素点入力
-let chipDisplayMode='p'; // 'p'=P入力 / 'count'=枚数入力
+let editScoreMode='pts'; // 対局編集用モード
 
 // ══ FIREBASE / AUTH STATE ══
 let fbDb=null,fbAuth=null,fbReady=false;
@@ -1197,28 +1200,14 @@ function buildScoreTable(session,opts={}){
   html+=`<tr class="total-row"><td style="text-align:center;font-size:10px">計</td>`;players.forEach(p=>{html+=`<td class="${ptTot[p.id]>=0?'pos':'neg'}">${ptTot[p.id]>=0?'+':''}${ptTot[p.id]}</td>`;});
   html+=`</tr><tr style="background:var(--sf2);border-top:2px solid var(--bd)"><td style="text-align:center;font-size:9px;color:var(--sub)">▼入力</td>`;
   players.forEach(p=>{html+=`<td style="text-align:center;padding:3px 2px"><span style="font-size:10px;font-weight:700;color:${p.color}">${esc(p.name)}</span></td>`;});
-  // チップ行（P入力 / 枚数入力 切り替え）
-  const chipRate=A.settings?.chipRate||5;
-  const isCount=showChipInput&&chipDisplayMode==='count';
-  const chipModeBtn=showChipInput?`<div style="display:flex;gap:3px;justify-content:center;margin-top:3px">
-    <button class="ftbtn${!isCount?' on':''}" style="padding:2px 5px;font-size:9px" onclick="setChipDisplayMode('p')">P</button>
-    <button class="ftbtn${isCount?' on':''}" style="padding:2px 5px;font-size:9px" onclick="setChipDisplayMode('count')">枚</button>
-  </div>`:'';
-  html+=`</tr><tr class="chip-row"><td style="text-align:center;padding:4px 2px">チップ${chipModeBtn}</td>`;
+  // チップ行（常にP値表示・ナンパッドでP/枚数切り替え）
+  html+=`</tr><tr class="chip-row"><td style="text-align:center">チップ</td>`;
   players.forEach(p=>{
-    const cvP=parseInt(chips[String(p.id)])||0; // stored as P
+    const cvP=parseInt(chips[String(p.id)])||0; // 常にP値で保存・表示
     const chipId=`chip-${session.id}-${p.id}`;
     if(showChipInput){
-      if(isCount){
-        // 枚数モード: 表示・入力は枚数（P / chipRate）、blur時にP換算して保存
-        const cvC=cvP?String(Math.round(cvP/chipRate)):'';
-        if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvC}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)} (枚数)',v=>chipInputCount(${p.id},v),v=>chipBlurCount(${p.id},v))"></td>`;}
-        else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvC}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)} (枚数)',null,v=>updateCompletedChipCount('${editSessId}',${p.id},v))"></td>`;}
-      } else {
-        // Pモード: 現行と同じ
-        if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)}',v=>chipInput(${p.id},v),v=>chipBlur(${p.id},v))"></td>`;}
-        else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openNumpad(this,'${esc(p.name)}',null,v=>updateCompletedChip('${editSessId}',${p.id},v))"></td>`;}
-      }
+      if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,'${esc(p.name)}',v=>chipInput(${p.id},v),v=>chipBlur(${p.id},v))"></td>`;}
+      else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,'${esc(p.name)}',null,v=>updateCompletedChip('${editSessId}',${p.id},v))"></td>`;}
     } else {
       html+=`<td class="${cvP>=0?'':'neg'}">${cvP>=0?'+':''}${cvP}</td>`;
     }
@@ -1261,31 +1250,7 @@ function chipBlur(pid,value){
 function toggleChipSign(id,pid){
   const el=document.getElementById(id);if(!el)return;
   const v=parseInt(el.value);if(isNaN(v)||v===0)return;
-  if(chipDisplayMode==='count'){
-    el.value=String(-v);kbSync(el);chipInputCount(pid,el.value);chipBlurCount(pid,el.value);
-  } else {
-    el.value=String(-v);kbSync(el);chipInput(pid,el.value);chipBlur(pid,el.value);
-  }
-}
-// チップ枚数モード（枚数↔P変換）
-function chipInputCount(pid,countStr){
-  const rate=A.settings?.chipRate||5;
-  const count=parseInt(countStr)||0;
-  chipInput(pid,String(count*rate));
-}
-function chipBlurCount(pid,countStr){
-  const rate=A.settings?.chipRate||5;
-  const count=parseInt(countStr)||0;
-  chipBlur(pid,String(count*rate));
-}
-function updateCompletedChipCount(sessId,pid,countStr){
-  const rate=A.settings?.chipRate||5;
-  const count=parseInt(countStr)||0;
-  updateCompletedChip(sessId,pid,String(count*rate));
-}
-function setChipDisplayMode(mode){
-  chipDisplayMode=mode;
-  renderSession(); // テーブルを再描画
+  el.value=String(-v);kbSync(el);chipInput(pid,el.value);chipBlur(pid,el.value);
 }
 function updateCompletedChip(sessId,pid,value){const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!isAdmin())return;sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;saveApp();const ptTot=sess.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);const tot=ptTot+(parseInt(value)||0);const cell=document.getElementById(`totalP-${sessId}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}}
 function toggleCompletedChipSign(id,sessId,pid){
@@ -1469,7 +1434,7 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>`}
-      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="${ph}" onclick="openNumpad(this,'${esc(p.name)}',()=>updateGamePreview(),()=>{autoFillLastScore();updateGamePreview();})">
+      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',()=>updateGamePreview(),()=>{autoFillLastScore();updateGamePreview();})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
@@ -1879,28 +1844,56 @@ function resumeSession(id){
 }
 
 // ══ EDIT GAME ══
+function setEditScoreMode(mode){
+  editScoreMode=mode;
+  document.getElementById('esmb-pts')?.classList.toggle('on',mode==='pts');
+  document.getElementById('esmb-raw')?.classList.toggle('on',mode==='raw');
+  // 入力値をリセットして再描画
+  const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
+  const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);
+  if(sess)_buildEditGameInputs(sess.games[editingGameIdx]);
+}
+function _buildEditGameInputs(game){
+  const isRaw=editScoreMode==='raw';
+  const jiten=A.settings?.jiten??35000;
+  const ph=isRaw?String(jiten):'0';
+  document.getElementById('edit-game-inputs').innerHTML=game[1].map(([pid,pts])=>{const p=playerById(pid);
+    // 素点モードの初期値は空欄（元のP値から逆算は不可）
+    const initVal=isRaw?'':String(pts);
+    return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
+      <div class="sname">${esc(p.name)}</div>
+      ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>`}
+      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?'openRawNumpad':'openNumpad'}(this,'${esc(p.name)}',null,null)">
+      <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
+    </div>`;}).join('');
+}
 function openEditGame(sessId,gameIdx){
   const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   editingSessId=sessId;editingGameIdx=gameIdx;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);if(!sess)return;
-  const game=sess.games[gameIdx];
-  document.getElementById('edit-game-inputs').innerHTML=game[1].map(([pid,pts])=>{const p=playerById(pid);
-    return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
-      <div class="sname">${esc(p.name)}</div>
-      <button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>
-      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${pts}" onclick="openNumpad(this,'${esc(p.name)}',null,null)">
-      <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
-    </div>`;}).join('');
+  // モードを pts に戻す
+  editScoreMode='pts';
+  document.getElementById('esmb-pts')?.classList.add('on');
+  document.getElementById('esmb-raw')?.classList.remove('on');
+  _buildEditGameInputs(sess.games[gameIdx]);
   document.getElementById('m-edit-game').classList.add('on');
 }
 function saveEditGame(){
   const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;
   const game=sess.games[editingGameIdx];
-  const vals=game[1].map(([pid])=>({pid,pts:parseInt(document.getElementById(`egsc-${pid}`)?.value)||0}));
-  const sum=vals.reduce((a,v)=>a+v.pts,0);if(sum!==0){toast('合計が0になっていません（'+sum+'）');return;}
-  const sorted=[...vals].sort((a,b)=>b.pts-a.pts);
-  sess.games[editingGameIdx]=[game[0],sorted.map((v,i)=>[v.pid,v.pts,i+1,v.pts<=-60?1:0])];
+  if(editScoreMode==='raw'){
+    const rawVals=game[1].map(([pid])=>({pid,rawPts:parseInt(document.getElementById(`egsc-${pid}`)?.value)||0}));
+    const jiten=A.settings?.jiten??35000;const target=jiten*rawVals.length;
+    const sum=rawVals.reduce((a,v)=>a+v.rawPts,0);if(sum!==target){toast('素点合計が'+target+'になっていません（'+sum+'）');return;}
+    const sorted=[...rawVals].sort((a,b)=>b.rawPts-a.rawPts);
+    sess.games[editingGameIdx]=[game[0],sorted.map((v,i)=>{const rank=i+1;return[v.pid,rawToScore(v.rawPts,rank),rank,0];})];
+  } else {
+    const vals=game[1].map(([pid])=>({pid,pts:parseInt(document.getElementById(`egsc-${pid}`)?.value)||0}));
+    const sum=vals.reduce((a,v)=>a+v.pts,0);if(sum!==0){toast('合計が0になっていません（'+sum+'）');return;}
+    const sorted=[...vals].sort((a,b)=>b.pts-a.pts);
+    sess.games[editingGameIdx]=[game[0],sorted.map((v,i)=>[v.pid,v.pts,i+1,v.pts<=-60?1:0])];
+  }
   saveApp();closeModal('m-edit-game');if(isActiveSess)renderSession();else openSessDetail(editingSessId);toast('対局を更新しました');
 }
 function deleteGame(sessId,gameIdx){
@@ -1926,7 +1919,10 @@ function setEditRemainder(pid){
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;
   const allPids=sess.games[editingGameIdx][1].map(([p])=>p);const others=allPids.filter(p=>p!==pid);let sum=0;
   for(const op of others){const v=document.getElementById(`egsc-${op}`)?.value;if(v===''||v===null||v===undefined){toast('他プレイヤーのポイントを入力してください');return;}sum+=parseInt(v)||0;}
-  const el=document.getElementById(`egsc-${pid}`);if(el)el.value=-sum;
+  const el=document.getElementById(`egsc-${pid}`);if(el){
+    if(editScoreMode==='raw'){const jiten=A.settings?.jiten??35000;const t=jiten*allPids.length;const rem=t-sum;el.value=String(Math.round(rem/1000)*1000);}
+    else{el.value=-sum;}
+  }
 }
 // ══ セッション中メンバー追加 ══
 function openAddMember(){
@@ -2291,32 +2287,104 @@ function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=d
 
 // ══ CUSTOM NUMPAD ══
 let _kbEl=null,_kbChangeFn=null,_kbBlurFn=null;
+let _kbIsChip=false,_kbChipCountMode=false; // チップ枚数モード
+let _kbRawMode=false,_kbRawVal=''; // 素点000固定モード
+function _npHide(){
+  document.getElementById('numpad').classList.remove('on');
+  document.getElementById('np-chip-mode').style.display='none';
+  document.getElementById('np-hint').style.display='none';
+  _kbEl=null;_kbChangeFn=null;_kbBlurFn=null;
+  _kbIsChip=false;_kbChipCountMode=false;_kbRawMode=false;_kbRawVal='';
+}
 function openNumpad(el,label,changeFn,blurFn){
   if(_kbBlurFn&&_kbEl)_kbBlurFn(_kbEl.value);
+  _kbIsChip=false;_kbChipCountMode=false;_kbRawMode=false;_kbRawVal='';
   _kbEl=el;_kbChangeFn=changeFn||null;_kbBlurFn=blurFn||null;
   document.getElementById('np-label').textContent=label||'';
   document.getElementById('np-val').textContent=el.value||'';
+  document.getElementById('np-chip-mode').style.display='none';
+  document.getElementById('np-hint').style.display='none';
   document.getElementById('numpad').classList.add('on');
   setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
+// チップ入力用ナンパッド（P/枚数トグル付き）
+function openChipNumpad(el,label,changeFn,blurFn){
+  openNumpad(el,label,changeFn,blurFn);
+  _kbIsChip=true;_kbChipCountMode=false;
+  document.getElementById('np-chip-mode').style.display='flex';
+  document.getElementById('np-cmP').classList.add('on');
+  document.getElementById('np-cmC').classList.remove('on');
+}
+// 素点入力用ナンパッド（下3桁000固定）
+function openRawNumpad(el,label,changeFn,blurFn){
+  openNumpad(el,label,changeFn,blurFn);
+  _kbRawMode=true;
+  const cur=parseInt(el.value)||0;
+  _kbRawVal=cur?String(Math.round(cur/1000)):'';
+  const disp=_kbRawVal?String(parseInt(_kbRawVal)*1000):'';
+  _kbEl.value=disp;document.getElementById('np-val').textContent=disp||'';
+  const h=document.getElementById('np-hint');h.textContent='千点単位で入力（下3桁は000固定）';h.style.display='block';
+}
+// チップ入力モード切り替え（P ↔ 枚数）
+function setNpChipMode(mode){
+  _kbChipCountMode=(mode==='count');
+  document.getElementById('np-cmP').classList.toggle('on',!_kbChipCountMode);
+  document.getElementById('np-cmC').classList.toggle('on',_kbChipCountMode);
+  const h=document.getElementById('np-hint');
+  const rate=A.settings?.chipRate||5;
+  if(_kbChipCountMode){
+    const curP=parseInt(_kbEl?.value)||0;
+    const curC=curP?String(Math.round(curP/rate)):'';
+    document.getElementById('np-val').textContent=curC||'';
+    const cnt=parseInt(curC)||0;
+    h.textContent=cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`;h.style.display='block';
+  } else {
+    const curC=parseInt(document.getElementById('np-val').textContent)||0;
+    const curP=curC?String(curC*rate):'';
+    document.getElementById('np-val').textContent=curP||'';
+    h.style.display='none';
+  }
+}
 function kbKey(k){
   if(!_kbEl)return;
+  if(_kbRawMode){
+    if(k==='⌫'){_kbRawVal=_kbRawVal.slice(0,-1);}
+    else if(k==='-'){_kbRawVal=_kbRawVal.startsWith('-')?_kbRawVal.slice(1):(_kbRawVal?'-'+_kbRawVal:'-');}
+    else{if(_kbRawVal===''||_kbRawVal==='0')_kbRawVal=k;else if(_kbRawVal==='-'||_kbRawVal==='-0')_kbRawVal='-'+k;else _kbRawVal+=k;}
+    const th=(_kbRawVal&&_kbRawVal!=='-')?parseInt(_kbRawVal):null;
+    const disp=th!==null?String(th*1000):(_kbRawVal==='-'?'-':'');
+    _kbEl.value=disp;document.getElementById('np-val').textContent=disp||'';
+    if(_kbChangeFn)_kbChangeFn(disp);return;
+  }
   let v=_kbEl.value;
   if(k==='⌫'){v=v.slice(0,-1);}
   else if(k==='-'){v=v.startsWith('-')?v.slice(1):(v?'-'+v:'-');}
   else{if(v===''||v==='0')v=k;else if(v==='-'||v==='-0')v='-'+k;else v+=k;}
-  _kbEl.value=v;
-  document.getElementById('np-val').textContent=v||'';
+  _kbEl.value=v;document.getElementById('np-val').textContent=v||'';
+  if(_kbIsChip&&_kbChipCountMode){
+    const rate=A.settings?.chipRate||5;const cnt=parseInt(v)||0;
+    const h=document.getElementById('np-hint');
+    h.textContent=cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`;h.style.display='block';
+  }
   if(_kbChangeFn)_kbChangeFn(v);
 }
 function kbOK(){
-  if(_kbBlurFn&&_kbEl)_kbBlurFn(_kbEl.value);
-  document.getElementById('numpad').classList.remove('on');
-  _kbEl=null;_kbChangeFn=null;_kbBlurFn=null;
+  if(!_kbEl)return;
+  let finalVal=_kbEl.value;
+  if(_kbIsChip&&_kbChipCountMode){
+    // 枚数→P変換してフィールドに反映
+    const rate=A.settings?.chipRate||5;
+    const cnt=parseInt(finalVal)||0;finalVal=String(cnt*rate);
+    _kbEl.value=finalVal;document.getElementById('np-val').textContent=finalVal;
+  }
+  if(_kbBlurFn)_kbBlurFn(finalVal);
+  _npHide();
 }
 function kbSwitchText(){
   if(!_kbEl)return;
   document.getElementById('numpad').classList.remove('on');
+  document.getElementById('np-chip-mode').style.display='none';
+  document.getElementById('np-hint').style.display='none';
   const el=_kbEl,blurFn=_kbBlurFn;
   el.removeAttribute('readonly');el.inputMode='decimal';
   el.focus();const len=el.value.length;try{el.setSelectionRange(len,len);}catch(e){}
@@ -2336,8 +2404,13 @@ initAuth();
   <div class="np-hd">
     <span class="np-label" id="np-label"></span>
     <span class="np-val" id="np-val"></span>
+    <div id="np-chip-mode" style="display:none;gap:4px;flex-shrink:0;align-items:center">
+      <button class="ftbtn on" id="np-cmP" style="padding:3px 9px;font-size:11px;border-radius:10px" onclick="setNpChipMode('p')">P</button>
+      <button class="ftbtn" id="np-cmC" style="padding:3px 9px;font-size:11px;border-radius:10px" onclick="setNpChipMode('count')">枚数</button>
+    </div>
     <span class="np-abc" onclick="kbSwitchText()">abc →</span>
   </div>
+  <div id="np-hint" style="font-size:11px;color:var(--gold);text-align:center;padding:2px 0 5px;display:none"></div>
   <div class="np-grid">
     <div class="npk" onclick="kbKey('7')">7</div>
     <div class="npk" onclick="kbKey('8')">8</div>
