@@ -2393,10 +2393,14 @@ function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=d
 let _kbEl=null,_kbChangeFn=null,_kbBlurFn=null;
 let _kbIsChip=false,_kbChipCountMode=false; // チップ枚数モード
 let _kbRawMode=false,_kbRawVal=''; // 素点000固定モード
+function _npSetHint(text,gold=false){
+  const h=document.getElementById('np-hint');if(!h)return;
+  h.textContent=text;h.style.color=gold?'var(--gold)':'var(--sub)';
+}
 function _npHide(){
   document.getElementById('numpad').classList.remove('on');
   document.getElementById('np-chip-mode').style.display='none';
-  document.getElementById('np-hint').style.display='none';
+  _npSetHint('数値を入力してください');
   _kbEl=null;_kbChangeFn=null;_kbBlurFn=null;
   _kbIsChip=false;_kbChipCountMode=false;_kbRawMode=false;_kbRawVal='';
 }
@@ -2407,17 +2411,39 @@ function openNumpad(el,label,changeFn,blurFn){
   document.getElementById('np-label').textContent=label||'';
   document.getElementById('np-val').textContent=el.value||'';
   document.getElementById('np-chip-mode').style.display='none';
-  document.getElementById('np-hint').style.display='none';
+  _npSetHint('数値を入力してください');
   document.getElementById('numpad').classList.add('on');
   setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
 }
-// チップ入力用ナンパッド（P/枚数トグル付き）
+// チップ入力用ナンパッド（P/枚数トグル付き、最後の選択を記憶）
 function openChipNumpad(el,label,changeFn,blurFn){
   openNumpad(el,label,changeFn,blurFn);
-  _kbIsChip=true;_kbChipCountMode=false;
+  _kbIsChip=true;
+  // 最後に選択したモードを復元
+  try{const saved=localStorage.getItem('sanma-chipmode');_kbChipCountMode=saved==='count';}catch(e){_kbChipCountMode=false;}
   document.getElementById('np-chip-mode').style.display='flex';
-  document.getElementById('np-cmP').classList.add('on');
-  document.getElementById('np-cmC').classList.remove('on');
+  if(_kbChipCountMode){
+    // 枚数モードで開く — _kbEl.value も枚数値に変換しておく
+    document.getElementById('np-cmP').classList.remove('on');
+    document.getElementById('np-cmC').classList.add('on');
+    const rate=A.settings?.chipRate||5;
+    const curP=parseInt(el.value)||0;
+    const curC=curP?String(Math.round(curP/rate)):'';
+    _kbEl.value=curC; // ← 内部値を枚数に
+    document.getElementById('np-val').textContent=curC||'';
+    const cnt=parseInt(curC)||0;
+    _npSetHint(cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`,true);
+  } else {
+    document.getElementById('np-cmP').classList.add('on');
+    document.getElementById('np-cmC').classList.remove('on');
+    _npSetHint(`P単位で入力（枚数タブで枚数入力も可）`);
+  }
+}
+// 素点表示：入力済み部分を通常色、固定の000を薄く表示
+function _setRawDisplay(th){
+  const el=document.getElementById('np-val');if(!el)return;
+  const main=(th&&th!=='-'&&th!=='')?th:(th==='-'?'-':'');
+  el.innerHTML=main+'<span style="opacity:0.3">000</span>';
 }
 // 素点入力用ナンパッド（下3桁000固定）
 function openRawNumpad(el,label,changeFn,blurFn){
@@ -2426,27 +2452,31 @@ function openRawNumpad(el,label,changeFn,blurFn){
   const cur=parseInt(el.value)||0;
   _kbRawVal=cur?String(Math.round(cur/1000)):'';
   const disp=_kbRawVal?String(parseInt(_kbRawVal)*1000):'';
-  _kbEl.value=disp;document.getElementById('np-val').textContent=disp||'';
-  const h=document.getElementById('np-hint');h.textContent='千点単位で入力（下3桁は000固定）';h.style.display='block';
+  _kbEl.value=disp;_setRawDisplay(_kbRawVal);
+  _npSetHint('千点単位で入力（下3桁は000固定）',true);
 }
-// チップ入力モード切り替え（P ↔ 枚数）
+// チップ入力モード切り替え（P ↔ 枚数）、選択をlocalStorageに保存
 function setNpChipMode(mode){
   _kbChipCountMode=(mode==='count');
+  try{localStorage.setItem('sanma-chipmode',mode);}catch(e){}
   document.getElementById('np-cmP').classList.toggle('on',!_kbChipCountMode);
   document.getElementById('np-cmC').classList.toggle('on',_kbChipCountMode);
-  const h=document.getElementById('np-hint');
   const rate=A.settings?.chipRate||5;
   if(_kbChipCountMode){
+    // PのフィールドをP値として読み、枚数に変換して _kbEl.value と表示を両方更新
     const curP=parseInt(_kbEl?.value)||0;
     const curC=curP?String(Math.round(curP/rate)):'';
+    if(_kbEl)_kbEl.value=curC; // ← 内部値も枚数に切り替え
     document.getElementById('np-val').textContent=curC||'';
     const cnt=parseInt(curC)||0;
-    h.textContent=cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`;h.style.display='block';
+    _npSetHint(cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`,true);
   } else {
-    const curC=parseInt(document.getElementById('np-val').textContent)||0;
+    // 枚数→P変換して _kbEl.value と表示を両方更新
+    const curC=parseInt(_kbEl?.value)||0;
     const curP=curC?String(curC*rate):'';
+    if(_kbEl)_kbEl.value=curP; // ← 内部値もP値に切り替え
     document.getElementById('np-val').textContent=curP||'';
-    h.style.display='none';
+    _npSetHint('P単位で入力（枚数タブで枚数入力も可）');
   }
 }
 function kbKey(k){
@@ -2457,7 +2487,7 @@ function kbKey(k){
     else{if(_kbRawVal===''||_kbRawVal==='0')_kbRawVal=k;else if(_kbRawVal==='-'||_kbRawVal==='-0')_kbRawVal='-'+k;else _kbRawVal+=k;}
     const th=(_kbRawVal&&_kbRawVal!=='-')?parseInt(_kbRawVal):null;
     const disp=th!==null?String(th*1000):(_kbRawVal==='-'?'-':'');
-    _kbEl.value=disp;document.getElementById('np-val').textContent=disp||'';
+    _kbEl.value=disp;_setRawDisplay(_kbRawVal);
     if(_kbChangeFn)_kbChangeFn(disp);return;
   }
   let v=_kbEl.value;
@@ -2467,8 +2497,7 @@ function kbKey(k){
   _kbEl.value=v;document.getElementById('np-val').textContent=v||'';
   if(_kbIsChip&&_kbChipCountMode){
     const rate=A.settings?.chipRate||5;const cnt=parseInt(v)||0;
-    const h=document.getElementById('np-hint');
-    h.textContent=cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`;h.style.display='block';
+    _npSetHint(cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`,true);
   }
   if(_kbChangeFn)_kbChangeFn(v);
 }
@@ -2488,7 +2517,6 @@ function kbSwitchText(){
   if(!_kbEl)return;
   document.getElementById('numpad').classList.remove('on');
   document.getElementById('np-chip-mode').style.display='none';
-  document.getElementById('np-hint').style.display='none';
   const el=_kbEl,blurFn=_kbBlurFn;
   el.removeAttribute('readonly');el.inputMode='decimal';
   el.focus();const len=el.value.length;try{el.setSelectionRange(len,len);}catch(e){}
@@ -2496,7 +2524,11 @@ function kbSwitchText(){
   el.addEventListener('blur',onBlur,{once:true});
   _kbEl=null;_kbChangeFn=null;_kbBlurFn=null;
 }
-function kbSync(el){if(_kbEl===el)document.getElementById('np-val').textContent=el.value||'';}
+function kbSync(el){
+  if(_kbEl!==el)return;
+  if(_kbRawMode){const cur=parseInt(el.value)||0;_kbRawVal=cur?String(Math.round(cur/1000)):'';_setRawDisplay(_kbRawVal);}
+  else{document.getElementById('np-val').textContent=el.value||'';}
+}
 // ══ INIT ══
 const navSessEl=document.getElementById('nav-sess');
 if(navSessEl){const dot=document.createElement('div');dot.id='sess-nav-dot';dot.className='nv-dot';dot.style.display='none';navSessEl.appendChild(dot);}
@@ -2508,13 +2540,13 @@ initAuth();
   <div class="np-hd">
     <span class="np-label" id="np-label"></span>
     <span class="np-val" id="np-val"></span>
-    <div id="np-chip-mode" style="display:none;gap:4px;flex-shrink:0;align-items:center">
-      <button class="ftbtn on" id="np-cmP" style="padding:3px 9px;font-size:11px;border-radius:10px" onclick="setNpChipMode('p')">P</button>
-      <button class="ftbtn" id="np-cmC" style="padding:3px 9px;font-size:11px;border-radius:10px" onclick="setNpChipMode('count')">枚数</button>
+    <div id="np-chip-mode" style="display:none;gap:4px;flex-shrink:0;align-items:center;flex-direction:row">
+      <button class="ftbtn on" id="np-cmP" style="padding:3px 10px;font-size:11px;border-radius:10px;white-space:nowrap" onclick="setNpChipMode('p')">P</button>
+      <button class="ftbtn" id="np-cmC" style="padding:3px 10px;font-size:11px;border-radius:10px;white-space:nowrap" onclick="setNpChipMode('count')">枚数</button>
     </div>
     <span class="np-abc" onclick="kbSwitchText()">abc →</span>
   </div>
-  <div id="np-hint" style="font-size:11px;color:var(--gold);text-align:center;padding:2px 0 5px;display:none"></div>
+  <div id="np-hint" style="font-size:11px;text-align:center;padding:2px 0 5px;min-height:20px;color:var(--sub)">数値を入力してください</div>
   <div class="np-grid">
     <div class="npk" onclick="kbKey('7')">7</div>
     <div class="npk" onclick="kbKey('8')">8</div>
