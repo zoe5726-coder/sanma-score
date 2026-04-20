@@ -1399,6 +1399,10 @@ function startSession(){
 function openAddGame(){
   if(!A.activeSession)return;
   _rawTieOrder=[];_rawTieCtx='add';
+  // 最後に選択したスコア入力モードを復元
+  try{const saved=localStorage.getItem('sanma-scoremode');if(saved==='raw'||saved==='pts')scoreInputMode=saved;}catch(e){}
+  document.getElementById('smb-pts')?.classList.toggle('on',scoreInputMode==='pts');
+  document.getElementById('smb-raw')?.classList.toggle('on',scoreInputMode==='raw');
   // チップ入力を強制保存（フォーカスが外れていない状態でも値を保持）
   A.activeSession.players.forEach(pid=>{
     const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
@@ -1571,6 +1575,7 @@ function _buildRawPreviewHtml(res){
 }
 function setScoreMode(mode){
   scoreInputMode=mode;_rawTieOrder=[];
+  try{localStorage.setItem('sanma-scoremode',mode);}catch(e){}
   document.getElementById('smb-pts')?.classList.toggle('on',mode==='pts');
   document.getElementById('smb-raw')?.classList.toggle('on',mode==='raw');
   sessGameSel.forEach(pid=>{const el=document.getElementById('gsc-'+pid);if(el)el.value='';});
@@ -1919,12 +1924,35 @@ function resumeSession(id){
 // ══ EDIT GAME ══
 function setEditScoreMode(mode){
   editScoreMode=mode;_rawTieOrder=[];
+  try{localStorage.setItem('sanma-scoremode',mode);}catch(e){}
   document.getElementById('esmb-pts')?.classList.toggle('on',mode==='pts');
   document.getElementById('esmb-raw')?.classList.toggle('on',mode==='raw');
   document.getElementById('edit-game-preview').innerHTML='';
   const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);
   if(sess)_buildEditGameInputs(sess.games[editingGameIdx]);
+}
+function autoFillLastEditScore(){
+  const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
+  const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;
+  const allPids=sess.games[editingGameIdx][1].map(([p])=>p);
+  const vals=allPids.map(pid=>{const v=document.getElementById(`egsc-${pid}`)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
+  const emptyVals=vals.filter(v=>v.pts===null);
+  const filledVals=vals.filter(v=>v.pts!==null);
+  if(emptyVals.length===1&&filledVals.length===2){
+    const autoEl=document.getElementById(`egsc-${emptyVals[0].pid}`);
+    if(autoEl){
+      if(editScoreMode==='raw'){
+        const jiten=A.settings?.jiten??35000;
+        const sum=filledVals.reduce((a,v)=>a+v.pts,0);
+        autoEl.value=String(jiten*3-sum);
+      } else {
+        const sum=filledVals.reduce((a,v)=>a+v.pts,0);
+        autoEl.value=String(-sum);
+      }
+      kbSync(autoEl);
+    }
+  }
 }
 function _updateEditGamePreview(){
   const el=document.getElementById('edit-game-preview');if(!el)return;
@@ -1952,7 +1980,7 @@ function _buildEditGameInputs(game){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>`}
-      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',null,${isRaw?'()=>_updateEditGamePreview()':'null'})">
+      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',${isRaw?'()=>_updateEditGamePreview()':'null'},()=>{autoFillLastEditScore();_updateEditGamePreview();})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
 }
@@ -1960,9 +1988,11 @@ function openEditGame(sessId,gameIdx){
   const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   editingSessId=sessId;editingGameIdx=gameIdx;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);if(!sess)return;
-  editScoreMode='pts';_rawTieOrder=[];_rawTieCtx='edit';
-  document.getElementById('esmb-pts')?.classList.add('on');
-  document.getElementById('esmb-raw')?.classList.remove('on');
+  // 最後に選択したスコア入力モードを復元
+  try{const saved=localStorage.getItem('sanma-scoremode');editScoreMode=(saved==='raw'||saved==='pts')?saved:'pts';}catch(e){editScoreMode='pts';}
+  _rawTieOrder=[];_rawTieCtx='edit';
+  document.getElementById('esmb-pts')?.classList.toggle('on',editScoreMode==='pts');
+  document.getElementById('esmb-raw')?.classList.toggle('on',editScoreMode==='raw');
   document.getElementById('edit-game-preview').innerHTML='';
   _buildEditGameInputs(sess.games[gameIdx]);
   document.getElementById('m-edit-game').classList.add('on');
