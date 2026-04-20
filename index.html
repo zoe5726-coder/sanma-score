@@ -376,6 +376,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button id="esmb-raw" class="ftbtn" onclick="setEditScoreMode('raw')" style="flex:1">素点入力</button>
   </div>
   <div id="edit-game-inputs"></div>
+  <div id="edit-game-preview" style="margin-top:8px"></div>
   <div class="mact">
     <button class="btn btn-s" onclick="closeModal('m-edit-game')">キャンセル</button>
     <button class="btn btn-p" onclick="saveEditGame()">保存</button>
@@ -465,7 +466,7 @@ const HIST={"players":[],"games":[],"sessions":[]};
 const PCOLORS=["#22c55e","#3b82f6","#f59e0b","#ef4444","#a855f7","#14b8a6","#f97316","#ec4899","#06b6d4","#84cc16","#8b5cf6","#d97706","#64748b","#0ea5e9","#10b981","#f43f5e","#6366f1","#78716c","#22d3ee","#a3e635","#c084fc","#fb923c","#34d399","#f472b6","#60a5fa","#fbbf24","#4ade80","#818cf8","#2dd4bf","#e879f9","#fb7185","#a78bfa","#38bdf8","#facc15"];
 
 // ══ APP STATE ══
-let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234',jiten:35000,kaeshi:40000,rankPts:[20,0,-20],chipRate:5}};
+let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234',jiten:35000,kaeshi:40000,rankPts:[20,0,-20],chipRate:5,tieRule:'kamicha'}};
 let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true;
 let homeYear='all',homeMonth='all';
 let playerYear='all',playerMonth='all',selPid=0,partnerView=0,pairView=0,pairSortCol='pts',pairSortDesc=true;
@@ -492,6 +493,8 @@ function togglePreviewMode(){
 let chart1=null,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
 let scoreInputMode='pts'; // 'pts'=スコア直接入力 / 'raw'=素点入力
 let editScoreMode='pts'; // 対局編集用モード
+let _rawTieOrder=[]; // 素点入力時の着順 (pid配列、インデックス=着順-1)
+let _rawTieCtx='add'; // 'add' or 'edit'
 
 // ══ FIREBASE / AUTH STATE ══
 let fbDb=null,fbAuth=null,fbReady=false;
@@ -1395,6 +1398,7 @@ function startSession(){
 // ══ ADD GAME ══
 function openAddGame(){
   if(!A.activeSession)return;
+  _rawTieOrder=[];_rawTieCtx='add';
   // チップ入力を強制保存（フォーカスが外れていない状態でも値を保持）
   A.activeSession.players.forEach(pid=>{
     const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
@@ -1465,13 +1469,14 @@ function updateGamePreview(){
   if(scoreInputMode==='raw'){
     const jiten=A.settings.jiten??35000;const target=jiten*sessGameSel.length;
     const sumColor=ok?(partialSum===target?'var(--ac)':'var(--red)'):'var(--sub)';
-    const sumHtml=`<div style="font-size:11px;text-align:right;padding:4px 0;color:${sumColor}">素点合計: ${partialSum} / ${target}${ok&&partialSum!==target?' ⚠':ok?' ✓':''}</div>`;
+    const sumHtml=`<div style="font-size:11px;text-align:right;padding:4px 0;color:${sumColor}">素点合計: ${partialSum.toLocaleString()} / ${target.toLocaleString()}${ok&&partialSum!==target?' ⚠':ok?' ✓':''}</div>`;
     if(ok){
-      if(partialSum!==target){el.innerHTML=`<p style="color:var(--red);font-size:12px;text-align:center;padding:6px 0">⚠ 素点合計が${target}になっていません</p>${sumHtml}`;document.getElementById('game-save-btn').disabled=true;return;}
-      // 素点 → スコア計算
-      const sorted=[...vals2].sort((a,b)=>b.pts-a.pts);
-      const res=sorted.map((v,i)=>{const rank=i+1;return{pid:v.pid,rawPts:v.pts,pts:rawToScore(v.pts,rank),rank};});
-      el.innerHTML=res.map(r=>{const p=playerById(r.pid);const em=r.rank===1?'🥇':r.rank===2?'🥈':'🥉';return`<div class="prev-row"><div class="prev-left">${em}<div style="width:7px;height:7px;border-radius:50%;background:${p.color}"></div>${esc(p.name)}</div><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="${r.pts>=0?'pos':'neg'}" style="font-weight:700">${r.pts>=0?'+':''}${r.pts}pt</span><span style="font-size:10px;color:var(--sub)">${r.rawPts.toLocaleString()}点</span></div></div>`;}).join('')+sumHtml;
+      if(partialSum!==target){el.innerHTML=`<p style="color:var(--red);font-size:12px;text-align:center;padding:6px 0">⚠ 素点合計が${target.toLocaleString()}になっていません</p>${sumHtml}`;document.getElementById('game-save-btn').disabled=true;return;}
+      _rawTieCtx='add';_syncRawTieOrder(vals2,sessGameSel);
+      const res=_computeRawScores(vals2);
+      const hasTie=res.some((r,i)=>i<res.length-1&&r.rawPts===res[i+1].rawPts);
+      const tieHint=hasTie&&(A.settings?.tieRule||'kamicha')==='kamicha'?`<div style="font-size:10px;color:var(--gold);text-align:center;padding:2px 0">↕ ボタンで同点の着順を入れ替えできます</div>`:'';
+      el.innerHTML=tieHint+_buildRawPreviewHtml(res)+sumHtml;
       document.getElementById('game-save-btn').disabled=false;
     } else {el.innerHTML=`<p style="color:var(--sub);font-size:12px;text-align:center;padding:6px 0">全員の素点を入力（目標: ${target.toLocaleString()}）</p>${filledPts.length>0?sumHtml:''}`;document.getElementById('game-save-btn').disabled=true;}
   } else {
@@ -1486,19 +1491,88 @@ function updateGamePreview(){
   }
 }
 function directPts(vals){return[...vals].sort((a,b)=>b.pts-a.pts).map((v,i)=>({pid:v.pid,pts:v.pts,rank:i+1}));}
-// 素点→スコア変換
+// 素点→スコア変換（上家取り用：単純計算）
 function rawToScore(rawPts,rank){
   const s=A.settings;
-  const jiten=s.jiten??35000;const kaeshi=s.kaeshi??40000;
+  const kaeshi=s.kaeshi??40000;const jiten=s.jiten??35000;
   const rankPts=s.rankPts||[20,0,-20];
-  const oka=(kaeshi-jiten)*3/1000; // 返し点ルール（1位が受け取る）
+  const oka=(kaeshi-jiten)*3/1000;
   return Math.round((rawPts-kaeshi)/1000)+(rankPts[rank-1]||0)+(rank===1?oka:0);
 }
+// 同点時の着順を素点順に同期（既存 _rawTieOrder を保持しつつ再ソート）
+function _syncRawTieOrder(vals,fallbackOrder){
+  const filled=vals.filter(v=>v.pts!==null);
+  const fb=fallbackOrder||[];
+  const sorted=[...filled].sort((a,b)=>{
+    if(b.pts!==a.pts)return b.pts-a.pts;
+    const ai=_rawTieOrder.indexOf(a.pid);const bi=_rawTieOrder.indexOf(b.pid);
+    if(ai>=0&&bi>=0)return ai-bi; // 既存順を保持
+    const fi=fb.indexOf(a.pid);const fj=fb.indexOf(b.pid);
+    return fi-fj; // フォールバック順
+  });
+  _rawTieOrder=sorted.map(v=>v.pid);
+}
+// 素点から着順・スコアを計算（同点ルールを適用）
+function _computeRawScores(vals){
+  const s=A.settings;
+  const kaeshi=s.kaeshi??40000;const jiten=s.jiten??35000;
+  const rankPts=s.rankPts||[20,0,-20];
+  const oka=(kaeshi-jiten)*3/1000;
+  const tieRule=s.tieRule||'kamicha';
+  const ptsMap={};vals.forEach(v=>{if(v.pts!==null)ptsMap[v.pid]=v.pts;});
+  const pids=_rawTieOrder.filter(pid=>ptsMap[pid]!==undefined);
+  if(tieRule==='bunbun'){
+    // 按分：同点者でウマを平均配分
+    const groups=[];
+    pids.forEach(pid=>{
+      const pts=ptsMap[pid];const last=groups[groups.length-1];
+      if(last&&last.pts===pts)last.pids.push(pid);
+      else groups.push({pts,pids:[pid]});
+    });
+    const result=[];let curRank=1;
+    for(const g of groups){
+      const ranks=Array.from({length:g.pids.length},(_,i)=>curRank+i);
+      const avgUma=ranks.reduce((s,r)=>s+(rankPts[r-1]||0),0)/g.pids.length;
+      const hasFirst=ranks.includes(1);
+      const okaShare=hasFirst?oka/g.pids.length:0;
+      g.pids.forEach(pid=>{
+        const base=(g.pts-kaeshi)/1000;
+        const score=base+avgUma+okaShare;
+        const pts=Math.round(score*10)/10; // 小数1桁まで
+        result.push({pid,rawPts:g.pts,pts,rank:curRank});
+      });
+      curRank+=g.pids.length;
+    }
+    return result;
+  } else {
+    return pids.map((pid,i)=>({pid,rawPts:ptsMap[pid],pts:rawToScore(ptsMap[pid],i+1),rank:i+1}));
+  }
+}
+// 同点プレイヤーを入れ替え（プレビューで↕ボタン押下時）
+function swapRawTie(idx){
+  if(idx<0||idx>=_rawTieOrder.length-1)return;
+  [_rawTieOrder[idx],_rawTieOrder[idx+1]]=[_rawTieOrder[idx+1],_rawTieOrder[idx]];
+  if(_rawTieCtx==='edit')_updateEditGamePreview();
+  else updateGamePreview();
+}
+// 素点入力プレビューHTML生成（共通）
+function _buildRawPreviewHtml(res){
+  const tieRule=A.settings?.tieRule||'kamicha';
+  return res.map((r,i)=>{
+    const p=playerById(r.pid);const em=r.rank===1?'🀄':r.rank===2?'🥈':'🥉';
+    const nextR=res[i+1];const isTiedNext=nextR&&r.rawPts===nextR.rawPts;
+    const prevR=i>0?res[i-1]:null;const isTiedPrev=prevR&&prevR.rawPts===r.rawPts;
+    const tiedBadge=(isTiedNext||isTiedPrev)?`<span style="font-size:9px;background:var(--gold);color:#000;border-radius:6px;padding:1px 5px;margin-left:4px">同点</span>`:'';
+    const swapBtn=(isTiedNext&&tieRule==='kamicha')?`<button class="btn btn-s" style="width:auto;padding:2px 6px;font-size:11px;margin-left:4px" onclick="swapRawTie(${i})">↕</button>`:'';
+    const ptsStr=Number.isInteger(r.pts)?String(r.pts):(r.pts>=0?'+':'')+r.pts.toFixed(1);
+    const ptsDisp=r.pts>=0?'+'+ptsStr:ptsStr;
+    return`<div class="prev-row"><div class="prev-left">${em}<div style="width:7px;height:7px;border-radius:50%;background:${p.color}"></div>${esc(p.name)}${tiedBadge}</div><div style="display:flex;align-items:center;gap:4px"><div style="display:flex;flex-direction:column;align-items:flex-end"><span class="${r.pts>=0?'pos':'neg'}" style="font-weight:700">${ptsDisp}pt</span><span style="font-size:10px;color:var(--sub)">${r.rawPts.toLocaleString()}点</span></div>${swapBtn}</div></div>`;
+  }).join('');
+}
 function setScoreMode(mode){
-  scoreInputMode=mode;
+  scoreInputMode=mode;_rawTieOrder=[];
   document.getElementById('smb-pts')?.classList.toggle('on',mode==='pts');
   document.getElementById('smb-raw')?.classList.toggle('on',mode==='raw');
-  // 入力値をリセット
   sessGameSel.forEach(pid=>{const el=document.getElementById('gsc-'+pid);if(el)el.value='';});
   buildGameScoreInputs();
 }
@@ -1506,11 +1580,10 @@ function saveGameToSession(){
   if(!A.activeSession)return;
   let res;
   if(scoreInputMode==='raw'){
-    const rawVals=sessGameSel.map(pid=>{const v=parseInt(document.getElementById('gsc-'+pid)?.value);return{pid,rawPts:isNaN(v)?0:v};});
+    const rawVals=sessGameSel.map(pid=>{const v=parseInt(document.getElementById('gsc-'+pid)?.value);return{pid,pts:isNaN(v)?0:v};});
     const jiten=A.settings.jiten??35000;const target=jiten*sessGameSel.length;
-    const sum=rawVals.reduce((a,v)=>a+v.rawPts,0);if(sum!==target){toast('素点合計が'+target+'になっていません（'+sum+'）');return;}
-    const sorted=[...rawVals].sort((a,b)=>b.rawPts-a.rawPts);
-    res=sorted.map((v,i)=>{const rank=i+1;return{pid:v.pid,pts:rawToScore(v.rawPts,rank),rank};});
+    const sum=rawVals.reduce((a,v)=>a+v.pts,0);if(sum!==target){toast('素点合計が'+target+'になっていません（'+sum+'）');return;}
+    _syncRawTieOrder(rawVals,sessGameSel);res=_computeRawScores(rawVals);
   } else {
     const vals=sessGameSel.map(pid=>{const v=parseInt(document.getElementById('gsc-'+pid)?.value);return{pid,pts:isNaN(v)?0:v};});
     const sum=vals.reduce((a,v)=>a+v.pts,0);if(sum!==0){toast('合計が0になっていません（'+sum+'）');return;}
@@ -1845,13 +1918,29 @@ function resumeSession(id){
 
 // ══ EDIT GAME ══
 function setEditScoreMode(mode){
-  editScoreMode=mode;
+  editScoreMode=mode;_rawTieOrder=[];
   document.getElementById('esmb-pts')?.classList.toggle('on',mode==='pts');
   document.getElementById('esmb-raw')?.classList.toggle('on',mode==='raw');
-  // 入力値をリセットして再描画
+  document.getElementById('edit-game-preview').innerHTML='';
   const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);
   if(sess)_buildEditGameInputs(sess.games[editingGameIdx]);
+}
+function _updateEditGamePreview(){
+  const el=document.getElementById('edit-game-preview');if(!el)return;
+  const isActiveSess=A.activeSession&&A.activeSession.id===editingSessId;
+  const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;
+  const pids=sess.games[editingGameIdx][1].map(([p])=>p);
+  const vals=pids.map(pid=>{const v=document.getElementById(`egsc-${pid}`)?.value;const n=parseInt(v);return{pid,pts:v&&v!==''&&!isNaN(n)?n:null};});
+  const ok=vals.every(v=>v.pts!==null);if(!ok){el.innerHTML='';return;}
+  const jiten=A.settings?.jiten??35000;const target=jiten*pids.length;
+  const sum=vals.reduce((a,v)=>a+(v.pts||0),0);
+  if(sum!==target){el.innerHTML=`<p style="color:var(--red);font-size:11px;text-align:center">⚠ 素点合計${sum.toLocaleString()} / ${target.toLocaleString()}</p>`;return;}
+  _rawTieCtx='edit';_syncRawTieOrder(vals,pids);
+  const res=_computeRawScores(vals);
+  const hasTie=res.some((r,i)=>i<res.length-1&&r.rawPts===res[i+1].rawPts);
+  const tieHint=hasTie&&(A.settings?.tieRule||'kamicha')==='kamicha'?`<div style="font-size:10px;color:var(--gold);text-align:center;padding:2px 0">↕ ボタンで着順を入れ替えできます</div>`:'';
+  el.innerHTML=tieHint+_buildRawPreviewHtml(res);
 }
 function _buildEditGameInputs(game){
   const isRaw=editScoreMode==='raw';
@@ -1863,7 +1952,7 @@ function _buildEditGameInputs(game){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>`}
-      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?'openRawNumpad':'openNumpad'}(this,'${esc(p.name)}',null,null)">
+      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',null,${isRaw?'()=>_updateEditGamePreview()':'null'})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
 }
@@ -1871,10 +1960,10 @@ function openEditGame(sessId,gameIdx){
   const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   editingSessId=sessId;editingGameIdx=gameIdx;
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);if(!sess)return;
-  // モードを pts に戻す
-  editScoreMode='pts';
+  editScoreMode='pts';_rawTieOrder=[];_rawTieCtx='edit';
   document.getElementById('esmb-pts')?.classList.add('on');
   document.getElementById('esmb-raw')?.classList.remove('on');
+  document.getElementById('edit-game-preview').innerHTML='';
   _buildEditGameInputs(sess.games[gameIdx]);
   document.getElementById('m-edit-game').classList.add('on');
 }
@@ -1883,11 +1972,12 @@ function saveEditGame(){
   const sess=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;
   const game=sess.games[editingGameIdx];
   if(editScoreMode==='raw'){
-    const rawVals=game[1].map(([pid])=>({pid,rawPts:parseInt(document.getElementById(`egsc-${pid}`)?.value)||0}));
+    const rawVals=game[1].map(([pid])=>{const v=parseInt(document.getElementById(`egsc-${pid}`)?.value);return{pid,pts:isNaN(v)?0:v};});
     const jiten=A.settings?.jiten??35000;const target=jiten*rawVals.length;
-    const sum=rawVals.reduce((a,v)=>a+v.rawPts,0);if(sum!==target){toast('素点合計が'+target+'になっていません（'+sum+'）');return;}
-    const sorted=[...rawVals].sort((a,b)=>b.rawPts-a.rawPts);
-    sess.games[editingGameIdx]=[game[0],sorted.map((v,i)=>{const rank=i+1;return[v.pid,rawToScore(v.rawPts,rank),rank,0];})];
+    const sum=rawVals.reduce((a,v)=>a+v.pts,0);if(sum!==target){toast('素点合計が'+target+'になっていません（'+sum+'）');return;}
+    _rawTieCtx='edit';_syncRawTieOrder(rawVals,game[1].map(([p])=>p));
+    const res=_computeRawScores(rawVals);
+    sess.games[editingGameIdx]=[game[0],res.map(r=>[r.pid,r.pts,r.rank,0])];
   } else {
     const vals=game[1].map(([pid])=>({pid,pts:parseInt(document.getElementById(`egsc-${pid}`)?.value)||0}));
     const sum=vals.reduce((a,v)=>a+v.pts,0);if(sum!==0){toast('合計が0になっていません（'+sum+'）');return;}
@@ -2212,6 +2302,7 @@ function renderSettings(){
       const s=A.settings;
       const jiten=s.jiten??35000;const kaeshi=s.kaeshi??40000;
       const rankPts=s.rankPts||[20,0,-20];const chipRate=s.chipRate??5;
+      const tieRule=s.tieRule||'kamicha';
       rulesCard.className='card';
       rulesCard.innerHTML=`<div class="ctitle">⚙️ ゲームルール設定</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
@@ -2230,8 +2321,20 @@ function renderSettings(){
               <input type="number" id="ri-r3" value="${rankPts[2]}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none;text-align:center"></div>
           </div>
         </div>
-        <div style="margin-bottom:12px"><div style="font-size:11px;color:var(--sub);margin-bottom:4px">チップ 1枚あたりP</div>
+        <div style="margin-bottom:10px"><div style="font-size:11px;color:var(--sub);margin-bottom:4px">チップ 1枚あたりP</div>
           <input type="number" id="ri-chiprate" value="${chipRate}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none"></div>
+        <div style="margin-bottom:12px"><div style="font-size:11px;color:var(--sub);margin-bottom:6px">同点時の処理（素点入力モード）</div>
+          <div style="display:flex;gap:8px">
+            <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--sf2);border:1px solid ${tieRule==='kamicha'?'var(--ac)':'var(--bd)'};border-radius:8px;padding:8px 10px;cursor:pointer">
+              <input type="radio" name="ri-tierule" id="ri-kamicha" value="kamicha" ${tieRule==='kamicha'?'checked':''} onchange="document.getElementById('ri-bunbun-lbl').style.borderColor='var(--bd)';this.parentElement.style.borderColor='var(--ac)'">
+              <div><div style="font-size:12px;font-weight:600">上家取り</div><div style="font-size:10px;color:var(--sub)">↕ボタンで手動指定</div></div>
+            </label>
+            <label id="ri-bunbun-lbl" style="flex:1;display:flex;align-items:center;gap:6px;background:var(--sf2);border:1px solid ${tieRule==='bunbun'?'var(--ac)':'var(--bd)'};border-radius:8px;padding:8px 10px;cursor:pointer">
+              <input type="radio" name="ri-tierule" id="ri-bunbun" value="bunbun" ${tieRule==='bunbun'?'checked':''} onchange="document.getElementById('ri-kamicha').parentElement.style.borderColor='var(--bd)';this.parentElement.style.borderColor='var(--ac)'">
+              <div><div style="font-size:12px;font-weight:600">按分</div><div style="font-size:10px;color:var(--sub)">ウマを平均配分</div></div>
+            </label>
+          </div>
+        </div>
         <button class="btn btn-p bsm" onclick="saveRuleSettings()">保存</button>`;
     } else {
       rulesCard.className='';
@@ -2246,7 +2349,8 @@ function saveRuleSettings(){
   const r2=parseInt(document.getElementById('ri-r2')?.value)||0;
   const r3=parseInt(document.getElementById('ri-r3')?.value)||-20;
   const chipRate=parseInt(document.getElementById('ri-chiprate')?.value)||5;
-  A.settings={...A.settings,jiten,kaeshi,rankPts:[r1,r2,r3],chipRate};
+  const tieRule=document.querySelector('input[name="ri-tierule"]:checked')?.value||'kamicha';
+  A.settings={...A.settings,jiten,kaeshi,rankPts:[r1,r2,r3],chipRate,tieRule};
   saveApp();toast('ルール設定を保存しました');
 }
 function syncSettingsUI(){}
