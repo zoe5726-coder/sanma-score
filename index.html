@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>三麻スコア管理</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🀄</text></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
@@ -103,7 +103,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sub-val{font-size:9px;color:var(--sub);margin-top:1px}
 /* ── PLAYER DD ── */
 .player-dd-wrap{position:relative;margin-bottom:8px}
-.player-dd{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:10px;padding:11px 38px 11px 14px;color:var(--tx);font-size:15px;font-weight:600;outline:none;cursor:text;transition:border-color .2s}
+.player-dd{width:100%;background:var(--sf);border:2px solid var(--bd);border-radius:10px;padding:11px 38px 11px 14px;color:var(--tx);font-size:16px;font-weight:600;outline:none;cursor:text;transition:border-color .2s}
 .player-dd-arrow{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--sub);font-size:13px}
 .player-suggestions{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--sf);border:1px solid var(--bd);border-radius:10px;z-index:300;max-height:220px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6);display:none}
 .player-sug-item{padding:11px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;border-bottom:1px solid var(--bd);touch-action:manipulation}
@@ -172,11 +172,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .cgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .field{margin-bottom:10px}
 .field label{display:block;font-size:11px;color:var(--sub);margin-bottom:3px}
-.field input,.field select{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;color:var(--tx);font-size:14px;outline:none;-webkit-appearance:none}
+.field input,.field select{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px 11px;color:var(--tx);font-size:16px;outline:none;-webkit-appearance:none}
 .field input:focus,.field select:focus{border-color:var(--ac)}
 .umagrid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
-.uf label{display:block;font-size:10px;color:var(--sub);margin-bottom:3px;text-align:center}
-.uf input{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:7px 4px;color:var(--tx);font-size:14px;text-align:center;outline:none}
 .cpicker{display:flex;gap:7px;flex-wrap:wrap;margin-top:3px}
 .csw{width:26px;height:26px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all .2s}
 .csw.on{border-color:#fff;transform:scale(1.2)}
@@ -202,7 +200,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .empty .ico{font-size:32px;margin-bottom:8px}.empty p{font-size:13px}
 .toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--ac);color:#000;padding:9px 18px;border-radius:18px;font-size:13px;font-weight:600;z-index:300;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
 .toast.on{opacity:1}
-.noteinput{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px;color:var(--tx);font-size:13px;outline:none;resize:none}
+.noteinput{width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:9px;color:var(--tx);font-size:16px;outline:none;resize:none}
 .sinput{width:105px;background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:16px;text-align:right;outline:none}
 .sinput:focus{border-color:var(--ac)}
 .srow{display:flex;align-items:center;gap:10px;background:var(--sf2);border-radius:10px;padding:11px;margin-bottom:9px}
@@ -490,7 +488,7 @@ function togglePreviewMode(){
   renderSettings();refreshCurrentTab();updateHdrBadge();
   toast(previewAsUser?'👁 一般ユーザーモードで表示中':'✅ 管理者モードに戻りました');
 }
-let chart1=null,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
+let chart1=null,_lastChartRenderId=0,mColor=PCOLORS[0],sessGameSel=[],sessPlayerFilter='all';
 let scoreInputMode='pts'; // 'pts'=スコア直接入力 / 'raw'=素点入力
 let editScoreMode='pts'; // 対局編集用モード
 let _rawTieOrder=[]; // 素点入力時の着順 (pid配列、インデックス=着順-1)
@@ -499,7 +497,8 @@ let _rawTieCtx='add'; // 'add' or 'edit'
 // ══ FIREBASE / AUTH STATE ══
 let fbDb=null,fbAuth=null,fbReady=false;
 let currentUser=null;
-let _skipNextRemote=false,_initialLoadDone=false;
+// 自分の書き込みによるリモート再描画をスキップするカウンター（複数の非同期操作が競合しても安全）
+let _skipRemoteCount=0,_initialLoadDone=false;
 
 // ══ HELPERS ══
 function fbConfigured(){return FIREBASE_CONFIG.apiKey&&FIREBASE_CONFIG.apiKey!=='PASTE_YOUR_API_KEY';}
@@ -619,13 +618,18 @@ function loadUiState(){
 }
 function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
 function mergeRemote(data){
-  if(!data)return;
-  // FirebaseはnullフィールドをDBから削除するため、'activeSession'キーがなければnullとして扱う
+  if(!data||typeof data!=='object')return;
+  // Firebaseはnullフィールドをimplicit削除するため、キーなし＝null
   if(!('activeSession' in data))data={...data,activeSession:null};
-  A={...A,...data,settings:{...A.settings,...(data.settings||{})}};
+  // 型バリデーション（壊れたデータがFirebaseから来ても安全に扱う）
+  const safeSessions=Array.isArray(data.completedSessions)?data.completedSessions.filter(s=>s&&typeof s==='object'&&s.id&&s.start&&Array.isArray(s.games)):A.completedSessions;
+  const safePlayers=Array.isArray(data.newPlayers)?data.newPlayers.filter(p=>p&&typeof p==='object'&&p.id&&p.name):A.newPlayers;
+  const safeFavs=Array.isArray(data.favorites)?data.favorites:A.favorites;
+  const safeSettings=data.settings&&typeof data.settings==='object'?{...A.settings,...data.settings}:A.settings;
+  A={...A,...data,completedSessions:safeSessions,newPlayers:safePlayers,favorites:safeFavs,settings:safeSettings};
   // 重複セッションを除去（IDが同じものは最初の1件だけ残す）
   const seen=new Set();
-  A.completedSessions=(A.completedSessions||[]).filter(s=>{
+  A.completedSessions=A.completedSessions.filter(s=>{
     if(!s||!s.id||seen.has(s.id))return false;
     seen.add(s.id);return true;
   });
@@ -650,7 +654,7 @@ function loadApp(){
       if(data)mergeRemote(data);
       syncSettingsUI();updateHdrBadge();setSyncStatus('synced','同期済み');go(currentTab||'home');
     } else {
-      if(_skipNextRemote){_skipNextRemote=false;setSyncStatus('synced','同期済み');return;}
+      if(_skipRemoteCount>0){_skipRemoteCount--;setSyncStatus('synced','同期済み');return;}
       if(data){
         // 他ユーザーの変更受信前に入力中のチップ・スコアを確定保存
         const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();
@@ -669,7 +673,7 @@ function loadApp(){
               dirty=true;
             }
           });
-          if(dirty)_skipNextRemote=true;
+          if(dirty)_skipRemoteCount++;
         }
         const hasActive=!!A.activeSession;
         refreshCurrentTab();updateHdrBadge();
@@ -686,15 +690,27 @@ function loadApp(){
   });
 }
 function saveApp(){
+  invalidateStatsCache();
   if(fbDb&&fbReady){
-    _skipNextRemote=true;setSyncStatus('syncing','保存中...');
+    _skipRemoteCount++;setSyncStatus('syncing','保存中...');
     fbDb.ref(FB_PATH).set(A).then(()=>setSyncStatus('synced','同期済み'))
-      .catch(e=>{_skipNextRemote=false;setSyncStatus('offline','保存エラー');console.error(e);});
-  } else {localStorage.setItem('sanma-v2',JSON.stringify(A));}
+      .catch(e=>{if(_skipRemoteCount>0)_skipRemoteCount--;setSyncStatus('offline','保存エラー: '+e.code);toast('⚠ 保存に失敗しました。再試行中...');setTimeout(()=>saveApp(),3000);});
+  } else {try{localStorage.setItem('sanma-v2',JSON.stringify(A));}catch(e){toast('⚠ ローカル保存エラー: ストレージ容量不足');}}
+}
+// Firebase更新を受けた後の再描画をデバウンス（連続更新でのジャンク防止）
+let _refreshDebounceTimer=null;
+function refreshCurrentTab(){
+  clearTimeout(_refreshDebounceTimer);
+  _refreshDebounceTimer=setTimeout(()=>{
+    if(currentTab==='home')renderHome();
+    else if(currentTab==='stats')renderStatsTable();
+    else if(currentTab==='player'){renderPlayerSelector();renderPlayerContent();}
+    else if(currentTab==='session')renderSession();
+  },80);
 }
 function setSyncStatus(state,msg){const d=document.getElementById('sync-dot');if(d){d.className='sync-dot '+state;d.title=msg;}}
 function showSyncBanner(msg){const b=document.getElementById('sync-banner'),m=document.getElementById('sync-banner-msg');if(!b||!m)return;m.textContent=msg;b.classList.add('on');clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove('on'),3000);}
-function refreshCurrentTab(){if(currentTab==='home')renderHome();else if(currentTab==='stats')renderStatsTable();else if(currentTab==='player'){renderPlayerSelector();renderPlayerContent();}else if(currentTab==='session')renderSession();}
+
 
 // ══ PLAYERS ══
 function allPlayers(){return[...HIST.players.map((n,i)=>({id:i,name:n,color:PCOLORS[i]||'#94a3b8',isHist:true})),...A.newPlayers.map(p=>({...p,isHist:false}))];}
@@ -723,7 +739,12 @@ function allSessions(){
 }
 
 // ══ STATS ══
+let _statsCache=new Map();
+function _statsCacheKey(opts){return JSON.stringify(opts)+'|'+A.completedSessions.length+'|'+(A.activeSession?.games?.length||0)+'|'+A.newPlayers.length;}
+function invalidateStatsCache(){_statsCache.clear();}
 function computeStats(opts={}){
+  const key=_statsCacheKey(opts);
+  if(_statsCache.has(key))return _statsCache.get(key);
   let games=allGames(),sessions=allSessions();
   if(opts.year){games=games.filter(g=>g[0].startsWith(opts.year));sessions=sessions.filter(s=>s[0].startsWith(opts.year));}
   if(opts.month){const p=`${opts.year}-${opts.month}`;games=games.filter(g=>g[0].startsWith(p));sessions=sessions.filter(s=>s[0].startsWith(p));}
@@ -733,8 +754,9 @@ function computeStats(opts={}){
     if(!st[pid])st[pid]={games:0,r1:0,r2:0,r3:0,tobi:0,pts:0,chips:0};
     st[pid].games++;if(rank===1)st[pid].r1++;else if(rank===2)st[pid].r2++;else if(rank===3)st[pid].r3++;if(tobi)st[pid].tobi++;st[pid].pts+=pts;
   }}
-  for(const[d,chips] of sessions)for(const[ps,ca] of Object.entries(chips)){const pid=parseInt(ps);if(st[pid])st[pid].chips+=ca;}
+  for(const[d,chips] of sessions)for(const[ps,ca] of Object.entries(chips)){const pid=parseInt(ps);if(!isNaN(pid)&&st[pid])st[pid].chips+=Number(ca)||0;}
   for(const s of Object.values(st)){const rk=s.r1+s.r2+s.r3;s.r1r=s.games>0?s.r1/s.games:0;s.r2r=s.games>0?s.r2/s.games:0;s.r3r=s.games>0?s.r3/s.games:0;s.tobir=s.games>0?s.tobi/s.games:0;s.avgRank=rk>0?(s.r1+s.r2*2+s.r3*3)/rk:0;s.totalP=s.pts+s.chips;s.avgP=s.games>0?s.totalP/s.games:0;}
+  _statsCache.set(key,st);
   return st;
 }
 function getCumulative(pid,year,month){
@@ -780,7 +802,6 @@ function go(tab,btn){
 function buildYearBar(yBid,mBid,onYear,onMonth){
   const yBar=document.getElementById(yBid);if(!yBar)return;
   const mBar=document.getElementById(mBid);if(mBar)mBar.style.display='none';
-  const fn=id=>id.replace(/-/g,'_');
   let curY,curM;
   if(yBid==='home-year-bar'){curY=homeYear;curM=homeMonth;}else if(yBid.startsWith('p-')){curY=playerYear;curM=playerMonth;}else{curY=statsYear;curM=statsMonth;}
   // 実データから年リストを動的生成
@@ -789,16 +810,17 @@ function buildYearBar(yBid,mBid,onYear,onMonth){
   if(A.activeSession?.start)yearSet.add(A.activeSession.start.slice(0,4));
   const years=['all',...[...yearSet].filter(y=>y!=='all').sort((a,b)=>b.localeCompare(a))];
   const months=['all','01','02','03','04','05','06','07','08','09','10','11','12'];
-  window[`setY_${fn(yBid)}`]=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);};
-  window[`setM_${fn(yBid)}_m`]=(m)=>{onMonth(m);buildYearBar(yBid,mBid,onYear,onMonth);};
+  // window[] を使わずクロージャで直接ハンドラーを定義
+  const setY=(y)=>{onYear(y);buildYearBar(yBid,mBid,onYear,onMonth);};
+  const setM=(m)=>{onMonth(m);buildYearBar(yBid,mBid,onYear,onMonth);};
   // 既存のselect要素だけ削除してボタンなど他の要素は保持
   yBar.querySelectorAll('.year-sel,.month-sel').forEach(e=>e.remove());
   const yearSel=document.createElement('select');yearSel.className='year-sel';
   yearSel.innerHTML=years.map(y=>`<option value="${y}"${y===curY?' selected':''}>${y==='all'?'全期間':y+'年'}</option>`).join('');
-  yearSel.onchange=e=>window[`setY_${fn(yBid)}`](e.target.value);
+  yearSel.onchange=e=>setY(e.target.value);
   const monthSel=document.createElement('select');monthSel.className='month-sel';
   monthSel.innerHTML=months.map(m=>`<option value="${m}"${m===curM?' selected':''}>${m==='all'?'全月':parseInt(m)+'月'}</option>`).join('');
-  monthSel.onchange=e=>window[`setM_${fn(yBid)}_m`](e.target.value);
+  monthSel.onchange=e=>setM(e.target.value);
   yBar.insertBefore(monthSel,yBar.firstChild);
   yBar.insertBefore(yearSel,yBar.firstChild);
 }
@@ -959,7 +981,9 @@ function renderPlayerContent(){
   <div class="card"><div class="ctitle">👥 同卓ペア別ランキング</div>
     <div id="pair-content"></div>
   </div>`;
+  _lastChartRenderId++;const _myRenderId=_lastChartRenderId;
   setTimeout(()=>{
+    if(_myRenderId!==_lastChartRenderId)return;
     if(chart1){chart1.destroy();chart1=null;}
     const ctx=document.getElementById('trend-chart');if(!ctx)return;
     let pts=getCumulative(pid,playerYear,playerMonth);if(pts.length>200){const step=Math.ceil(pts.length/200);pts=pts.filter((_,i)=>i%step===0||i===pts.length-1);}
@@ -1015,6 +1039,7 @@ function renderPlayerSessions(){
     const chip=parseInt(s.chips?.[String(pid)])||0;
     let games=0,r1=0,r2=0,r3=0,pts=0;
     for(const g of s.games){
+      if(!g||!Array.isArray(g[1]))continue;
       const me=g[1].find(x=>x[0]===pid);
       if(!me)continue;
       games++;pts+=me[1];
@@ -1209,8 +1234,8 @@ function buildScoreTable(session,opts={}){
     const cvP=parseInt(chips[String(p.id)])||0; // 常にP値で保存・表示
     const chipId=`chip-${session.id}-${p.id}`;
     if(showChipInput){
-      if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,'${esc(p.name)}',v=>chipInput(${p.id},v),v=>chipBlur(${p.id},v))"></td>`;}
-      else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,'${esc(p.name)}',null,v=>updateCompletedChip('${editSessId}',${p.id},v))"></td>`;}
+      if(isActive){html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,playerById(${p.id}).name,v=>chipInput(${p.id},v),v=>chipBlur(${p.id},v))"></td>`;}
+      else{html+=`<td><input class="chip-inp" id="${chipId}" type="text" inputmode="none" readonly value="${cvP||''}" placeholder="0" onclick="openChipNumpad(this,playerById(${p.id}).name,null,v=>updateCompletedChip('${editSessId}',${p.id},v))"></td>`;}
     } else {
       html+=`<td class="${cvP>=0?'':'neg'}">${cvP>=0?'+':''}${cvP}</td>`;
     }
@@ -1243,9 +1268,9 @@ function chipBlur(pid,value){
   A.activeSession.chips[String(pid)]=num;
   if(fbDb&&fbReady){
     // 自分のチップ書き込みによる再描画を防ぐ（chips/pidへの部分更新もon('value')を発火するため）
-    _skipNextRemote=true;
+    _skipRemoteCount++;
     fbDb.ref(`${FB_PATH}/activeSession/chips/${pid}`).set(num)
-      .catch(e=>{_skipNextRemote=false;console.error('chip save error',e);});
+      .catch(e=>{if(_skipRemoteCount>0)_skipRemoteCount--;console.error('chip save error',e);});
   } else {
     localStorage.setItem('sanma-v2',JSON.stringify(A));
   }
@@ -1376,13 +1401,13 @@ function startSession(){
   const dtVal=document.getElementById('sess-start-dt').value;if(!dtVal){toast('開始日時を入力してください');return;}
   const newSess={id:Date.now().toString(),start:dtVal,players:[...sel],games:[],chips:{}};
   if(fbDb&&fbReady){
-    _skipNextRemote=true;
+    _skipRemoteCount++;
     fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
       if(cur!==null&&cur!==undefined)return; // 既に開始済みならアボート
       return newSess;
     },(err,committed)=>{
       if(err||!committed){
-        _skipNextRemote=false;
+        if(_skipRemoteCount>0)_skipRemoteCount--;
         toast(committed===false?'⚠ 他のユーザーがすでにセッションを開始しています':'保存エラー');
         return;
       }
@@ -1442,7 +1467,7 @@ function buildGameScoreInputs(){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('gsc-${pid}','updateGamePreview')">±</button>`}
-      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',()=>updateGamePreview(),()=>{autoFillLastScore();updateGamePreview();})">
+      <input class="sinput" type="text" inputmode="none" readonly id="gsc-${pid}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,playerById(${pid}).name,()=>updateGamePreview(),()=>{autoFillLastScore();updateGamePreview();})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setRemainder(${pid})">残り</button>
     </div>`;}).join('');
   updateGamePreview();
@@ -1598,14 +1623,14 @@ function saveGameToSession(){
   const game=[localNow,res.map(r=>[r.pid,r.pts,r.rank,r.pts<=-60?1:0])];
   if(fbDb&&fbReady){
     const sessId=A.activeSession.id;
-    _skipNextRemote=true;
+    _skipRemoteCount++;
     // トランザクションでアトミックにゲームを追加（複数人同時追加でも消えない）
     fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
       if(!cur||cur.id!==sessId)return; // セッションが変わっていたらアボート
       return{...cur,games:[...(cur.games||[]),game]};
     },(err,committed,snap)=>{
       if(err||!committed){
-        _skipNextRemote=false;
+        if(_skipRemoteCount>0)_skipRemoteCount--;
         toast(committed===false?'⚠ セッションが変更されました。再度お試しください':'保存エラー');
         return;
       }
@@ -1646,7 +1671,6 @@ function openEndSession(){
       A.activeSession.chips[String(pid)]=v;
     }
   });
-  saveApp();
   const now=new Date();
   document.getElementById('sess-end-dt').value=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
   document.getElementById('sess-note').value='';
@@ -1674,16 +1698,16 @@ function endSession(){
   const sessData={...A.activeSession,end:endDt,note};
   if(fbDb&&fbReady){
     // トランザクションでアトミックに終了（複数人が同時に終了ボタンを押しても1回しか実行されない）
-    _skipNextRemote=true;
+    _skipRemoteCount++;
     fbDb.ref(FB_PATH).transaction(current=>{
       if(!current)return; // アボート
       if(!current.activeSession||current.activeSession.id!==sessId)return; // 既に終了済み→アボート
       return{...current,activeSession:null,completedSessions:[...(current.completedSessions||[]),sessData]};
     },(err,committed,snap)=>{
-      if(err){_skipNextRemote=false;toast('保存エラー: '+err.message);return;}
+      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('保存エラー: '+err.message);return;}
       if(!committed){
         // 他のユーザーが先に終了した
-        _skipNextRemote=false;
+        if(_skipRemoteCount>0)_skipRemoteCount--;
         toast('⚠ このセッションは既に他のユーザーが終了しました');
         if(snap&&snap.val())mergeRemote(snap.val());
         A.activeSession=null;closeModal('m-end-sess');updateHdrBadge();renderSession();
@@ -1777,9 +1801,9 @@ async function shareSession(id){
       const file=new File([blob],'sanma-score.png',{type:'image/png'});
       if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
         try{await navigator.share({files:[file],title:'三麻スコア'});}
-        catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.download='sanma-score.png';a.href=URL.createObjectURL(blob);a.click();}}
+        catch(e){if(e.name!=='AbortError'){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-score.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}}
       }else{
-        const a=document.createElement('a');a.download='sanma-score.png';a.href=URL.createObjectURL(blob);a.click();
+        const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-score.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
       }
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
@@ -1865,8 +1889,8 @@ async function sharePlayerStats(){
       const file=new File([blob],'sanma-player.png',{type:'image/png'});
       if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
         try{await navigator.share({files:[file],title:`${p.name}の成績`});}
-        catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.download='sanma-player.png';a.href=URL.createObjectURL(blob);a.click();}}
-      }else{const a=document.createElement('a');a.download='sanma-player.png';a.href=URL.createObjectURL(blob);a.click();}
+        catch(e){if(e.name!=='AbortError'){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-player.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}}
+      }else{const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-player.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
 }
@@ -1908,8 +1932,8 @@ async function shareStatsTable(){
       const file=new File([blob],'sanma-stats.png',{type:'image/png'});
       if(navigator.share&&navigator.canShare&&navigator.canShare({files:[file]})){
         try{await navigator.share({files:[file],title:'三麻集計'});}
-        catch(e){if(e.name!=='AbortError'){const a=document.createElement('a');a.download='sanma-stats.png';a.href=URL.createObjectURL(blob);a.click();}}
-      }else{const a=document.createElement('a');a.download='sanma-stats.png';a.href=URL.createObjectURL(blob);a.click();}
+        catch(e){if(e.name!=='AbortError'){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-stats.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}}
+      }else{const url=URL.createObjectURL(blob);const a=document.createElement('a');a.download='sanma-stats.png';a.href=url;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
 }
@@ -1980,7 +2004,7 @@ function _buildEditGameInputs(game){
     return`<div class="srow"><div style="width:7px;height:32px;border-radius:3px;background:${p.color};flex-shrink:0"></div>
       <div class="sname">${esc(p.name)}</div>
       ${isRaw?'':`<button class="btn btn-s" style="width:auto;padding:6px 9px;font-size:14px;border-radius:8px;flex-shrink:0" onclick="toggleSign('egsc-${pid}',null)">±</button>`}
-      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,'${esc(p.name)}',${isRaw?'()=>_updateEditGamePreview()':'null'},()=>{autoFillLastEditScore();_updateEditGamePreview();})">
+      <input class="sinput" type="text" inputmode="none" readonly id="egsc-${pid}" value="${initVal}" placeholder="${ph}" onclick="${isRaw?`openRawNumpad`:`openNumpad`}(this,playerById(${pid}).name,${isRaw?'()=>_updateEditGamePreview()':'null'},()=>{autoFillLastEditScore();_updateEditGamePreview();})">
       <button class="btn btn-s" style="width:auto;padding:6px 10px;font-size:11px;border-radius:8px;flex-shrink:0" onclick="setEditRemainder(${pid})">残り</button>
     </div>`;}).join('');
 }
@@ -2223,7 +2247,7 @@ function importBackup(input){
   const r=new FileReader();
   r.onload=e=>{
     try{
-      const wb=XLSX.read(e.target.result,{type:'binary'});
+      const wb=XLSX.read(e.target.result,{type:'array'});
       const pSheet=wb.Sheets['プレイヤー'],sSheet=wb.Sheets['セッション'],gSheet=wb.Sheets['対局'];
       if(!pSheet||!sSheet||!gSheet)throw new Error('シートが見つかりません（プレイヤー・セッション・対局が必要です）');
       const pRows=XLSX.utils.sheet_to_json(pSheet,{header:1}).slice(1).filter(r=>r[0]!==undefined);
@@ -2253,7 +2277,7 @@ function importBackup(input){
       },'復元');
     }catch(err){toast('ファイルエラー: '+err.message);}
   };
-  r.readAsBinaryString(f);input.value='';
+  r.readAsArrayBuffer(f);input.value='';
 }
 
 
@@ -2337,22 +2361,22 @@ function renderSettings(){
       rulesCard.innerHTML=`<div class="ctitle">⚙️ ゲームルール設定</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
           <div><div style="font-size:11px;color:var(--sub);margin-bottom:4px">持ち点</div>
-            <input type="number" id="ri-jiten" value="${jiten}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none"></div>
+            <input type="text" inputmode="none" readonly id="ri-jiten" value="${jiten}" onclick="openNumpad(this,'持ち点',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;cursor:pointer;box-sizing:border-box"></div>
           <div><div style="font-size:11px;color:var(--sub);margin-bottom:4px">返し点</div>
-            <input type="number" id="ri-kaeshi" value="${kaeshi}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none"></div>
+            <input type="text" inputmode="none" readonly id="ri-kaeshi" value="${kaeshi}" onclick="openNumpad(this,'返し点',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;cursor:pointer;box-sizing:border-box"></div>
         </div>
         <div style="margin-bottom:10px"><div style="font-size:11px;color:var(--sub);margin-bottom:6px">順位点（ウマ）</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
             <div><div style="font-size:10px;color:var(--gold);margin-bottom:3px;text-align:center">🥇 1位</div>
-              <input type="number" id="ri-r1" value="${rankPts[0]}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none;text-align:center"></div>
+              <input type="text" inputmode="none" readonly id="ri-r1" value="${rankPts[0]}" onclick="openNumpad(this,'1位 ウマ',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;text-align:center;cursor:pointer;box-sizing:border-box"></div>
             <div><div style="font-size:10px;color:var(--slv);margin-bottom:3px;text-align:center">🥈 2位</div>
-              <input type="number" id="ri-r2" value="${rankPts[1]}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none;text-align:center"></div>
+              <input type="text" inputmode="none" readonly id="ri-r2" value="${rankPts[1]}" onclick="openNumpad(this,'2位 ウマ',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;text-align:center;cursor:pointer;box-sizing:border-box"></div>
             <div><div style="font-size:10px;color:var(--brz);margin-bottom:3px;text-align:center">🥉 3位</div>
-              <input type="number" id="ri-r3" value="${rankPts[2]}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none;text-align:center"></div>
+              <input type="text" inputmode="none" readonly id="ri-r3" value="${rankPts[2]}" onclick="openNumpad(this,'3位 ウマ',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;text-align:center;cursor:pointer;box-sizing:border-box"></div>
           </div>
         </div>
         <div style="margin-bottom:10px"><div style="font-size:11px;color:var(--sub);margin-bottom:4px">チップ 1枚あたりP</div>
-          <input type="number" id="ri-chiprate" value="${chipRate}" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;outline:none"></div>
+          <input type="text" inputmode="none" readonly id="ri-chiprate" value="${chipRate}" onclick="openNumpad(this,'チップ 1枚あたりP',null,null)" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:16px;outline:none;cursor:pointer;box-sizing:border-box"></div>
         <div style="margin-bottom:12px"><div style="font-size:11px;color:var(--sub);margin-bottom:6px">同点時の処理（素点入力モード）</div>
           <div style="display:flex;gap:8px">
             <label style="flex:1;display:flex;align-items:center;gap:6px;background:var(--sf2);border:1px solid ${tieRule==='kamicha'?'var(--ac)':'var(--bd)'};border-radius:8px;padding:8px 10px;cursor:pointer">
@@ -2380,6 +2404,11 @@ function saveRuleSettings(){
   const r3=parseInt(document.getElementById('ri-r3')?.value)||-20;
   const chipRate=parseInt(document.getElementById('ri-chiprate')?.value)||5;
   const tieRule=document.querySelector('input[name="ri-tierule"]:checked')?.value||'kamicha';
+  // 入力値の範囲チェック
+  if(jiten<1000||jiten>200000){toast('持ち点は1,000〜200,000の範囲で入力してください');return;}
+  if(kaeshi<1000||kaeshi>200000){toast('返し点は1,000〜200,000の範囲で入力してください');return;}
+  if(chipRate<1||chipRate>1000){toast('チップレートは1〜1,000の範囲で入力してください');return;}
+  if(r1<-1000||r1>1000||r2<-1000||r2>1000||r3<-1000||r3>1000){toast('ウマは-1,000〜1,000の範囲で入力してください');return;}
   A.settings={...A.settings,jiten,kaeshi,rankPts:[r1,r2,r3],chipRate,tieRule};
   saveApp();toast('ルール設定を保存しました');
 }
@@ -2396,12 +2425,15 @@ function loadAllowedUsers(){
       <div style="flex:1"><div style="font-size:12px;font-weight:600">${esc(u.name||'')}</div><div style="font-size:10px;color:var(--sub)">${esc(u.email||'')}${u.admin?' · 管理者':''}</div></div>
       ${u.email!==currentUser.email?`<button class="btn btn-d bxsm" onclick="removeAllowedUser('${encodeEmail(u.email||'')}')">削除</button>`:'<span style="font-size:10px;color:var(--sub)">自分</span>'}
     </div>`).join('');
-  });
+  },err=>{const el=document.getElementById('allowed-users-list');if(el)el.innerHTML=`<p style="font-size:12px;color:var(--red)">読み込みエラー: ${esc(err.message)}</p>`;});
 }
 function addAllowedUser(){
-  const email=document.getElementById('add-user-email')?.value?.trim();if(!email||!email.includes('@')){toast('正しいメールアドレスを入力してください');return;}
-  const key=encodeEmail(email);fbDb.ref('config/allowedUsers/'+key).set({name:email.split('@')[0],email,admin:false});
-  document.getElementById('add-user-email').value='';toast('追加しました: '+email);setTimeout(loadAllowedUsers,500);
+  const email=document.getElementById('add-user-email')?.value?.trim();
+  if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){toast('正しいメールアドレスを入力してください');return;}
+  const key=encodeEmail(email);
+  fbDb.ref('config/allowedUsers/'+key).set({name:email.split('@')[0],email,admin:false})
+    .then(()=>{document.getElementById('add-user-email').value='';toast('追加しました: '+email);loadAllowedUsers();})
+    .catch(err=>{toast('追加エラー: '+err.message);});
 }
 function removeAllowedUser(key){openConfirm('ユーザーを削除','このユーザーのアクセスを削除しますか？',()=>{fbDb.ref('config/allowedUsers/'+key).remove();closeModal('m-confirm');toast('削除しました');setTimeout(loadAllowedUsers,500);},'削除');}
 
@@ -2417,8 +2449,6 @@ function openConfirm(title,msg,fn,btnLabel){document.getElementById('m-ctitle').
 function closeModal(id){document.getElementById(id).classList.remove('on');}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',function(e){if(e.target===this)closeModal(this.id);}));
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2500);}
-function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=document.getElementById('sess-nav-dot');if(A.activeSession){badge.className='active-badge';badge.textContent='●セッション中';if(dot)dot.style.display='block';}else{badge.className='badge';badge.textContent='三人麻雀';if(dot)dot.style.display='none';}}
-
 // ══ CUSTOM NUMPAD ══
 let _kbEl=null,_kbChangeFn=null,_kbBlurFn=null;
 let _kbIsChip=false,_kbChipCountMode=false; // チップ枚数モード
