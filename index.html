@@ -467,7 +467,7 @@ const PCOLORS=["#22c55e","#3b82f6","#f59e0b","#ef4444","#a855f7","#14b8a6","#f97
 let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234',jiten:35000,kaeshi:40000,rankPts:[20,0,-20],chipRate:5,tieRule:'kamicha'}};
 let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true;
 let homeYear='all',homeMonth='all';
-let playerYear='all',playerMonth='all',selPid=0,partnerView=0,pairView=0,pairSortCol='pts',pairSortDesc=true;
+let playerYear='all',playerMonth='all',selPid=null,partnerView=0,pairView=0,pairSortCol='pts',pairSortDesc=true;
 let partnerSortCol0='totalP',partnerSortDesc0=true;
 let partnerSortCol1='games',partnerSortDesc1=true;
 let currentTab='home';
@@ -539,15 +539,18 @@ function signInWithGoogle(){
 function checkAllowed(user){
   const key=encodeEmail(user.email);
   fbDb.ref('config/allowedUsers/'+key).once('value',snap=>{
+    const fallbackName=user.displayName||user.email?.split('@')[0]||'';
     if(snap.val()){
-      currentUser={uid:user.uid,email:user.email,name:user.displayName,photo:user.photoURL,...snap.val()};
+      currentUser={uid:user.uid,email:user.email,name:fallbackName,photo:user.photoURL,...snap.val()};
+      // Firebase保存のnameがnullの場合はfallbackを使用
+      if(!currentUser.name)currentUser.name=fallbackName;
       showApp();loadApp();
     } else {
       // 初めてのユーザー → 許可ユーザーが誰もいなければ自動的に管理者に
       fbDb.ref('config/allowedUsers').once('value',allSnap=>{
         if(!allSnap.val()){
-          fbDb.ref('config/allowedUsers/'+key).set({name:user.displayName,email:user.email,admin:true});
-          currentUser={uid:user.uid,email:user.email,name:user.displayName,photo:user.photoURL,admin:true};
+          fbDb.ref('config/allowedUsers/'+key).set({name:fallbackName,email:user.email,admin:true});
+          currentUser={uid:user.uid,email:user.email,name:fallbackName,photo:user.photoURL,admin:true};
           showApp();loadApp();
         } else {
           fbAuth.signOut();
@@ -613,7 +616,7 @@ function loadUiState(){
     statsYear=st.statsYear||'all';statsMonth=st.statsMonth||'all';
     homeYear=st.homeYear||'all';homeMonth=st.homeMonth||'all';
     playerYear=st.playerYear||'all';playerMonth=st.playerMonth||'all';
-    selPid=st.selPid||0;partnerView=st.partnerView||0;currentTab=st.currentTab||'home';
+    selPid=st.selPid??null;partnerView=st.partnerView||0;currentTab=st.currentTab||'home';
   }}catch(e){}
 }
 function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
@@ -623,7 +626,7 @@ function mergeRemote(data){
   if(!('activeSession' in data))data={...data,activeSession:null};
   // 型バリデーション（壊れたデータがFirebaseから来ても安全に扱う）
   const safeSessions=Array.isArray(data.completedSessions)?data.completedSessions.filter(s=>s&&typeof s==='object'&&s.id&&s.start&&Array.isArray(s.games)):A.completedSessions;
-  const safePlayers=Array.isArray(data.newPlayers)?data.newPlayers.filter(p=>p&&typeof p==='object'&&p.id&&p.name):A.newPlayers;
+  const safePlayers=Array.isArray(data.newPlayers)?data.newPlayers.filter(p=>p&&typeof p==='object'&&p.id!=null&&p.name):A.newPlayers;
   const safeFavs=Array.isArray(data.favorites)?data.favorites:A.favorites;
   const safeSettings=data.settings&&typeof data.settings==='object'?{...A.settings,...data.settings}:A.settings;
   A={...A,...data,completedSessions:safeSessions,newPlayers:safePlayers,favorites:safeFavs,settings:safeSettings};
@@ -715,7 +718,8 @@ function showSyncBanner(msg){const b=document.getElementById('sync-banner'),m=do
 // ══ PLAYERS ══
 function allPlayers(){return[...HIST.players.map((n,i)=>({id:i,name:n,color:PCOLORS[i]||'#94a3b8',isHist:true})),...A.newPlayers.map(p=>({...p,isHist:false}))];}
 function playerById(id){
-  if(id>=0&&id<HIST.players.length&&id<100)return{id,name:HIST.players[id],color:PCOLORS[id]||'#94a3b8'};
+  if(id==null)return{id,name:'?',color:'#888'};
+  if(typeof id==='number'&&id>=0&&id<HIST.players.length&&id<100)return{id,name:HIST.players[id],color:PCOLORS[id]||'#94a3b8'};
   return A.newPlayers.find(p=>p.id===id)||{id,name:'?',color:'#888'};
 }
 function isFav(pid){return A.favorites.includes(pid);}
@@ -900,7 +904,7 @@ function sortStats(col){if(sortCol===col)sortDesc=!sortDesc;else{sortCol=col;sor
 let _playerDDList=[];
 function renderPlayerSelector(){
   const st=computeStats();_playerDDList=allPlayers().filter(p=>st[p.id]&&st[p.id].games>0);
-  if(!_playerDDList.length)return;if(!_playerDDList.find(p=>p.id===selPid))selPid=_playerDDList[0].id;
+  if(!_playerDDList.length)return;if(selPid==null||!_playerDDList.find(p=>p.id===selPid))selPid=_playerDDList[0].id;
   const input=document.getElementById('player-search');if(!input)return;
   const cur=playerById(selPid);input.value=cur.name;input.style.borderColor=cur.color;input.style.color=cur.color;
 }
