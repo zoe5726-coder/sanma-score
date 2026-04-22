@@ -1345,9 +1345,29 @@ function renderNoSession(el){
       ${isAdmin()?`<button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>`:''}
     </div>`;}).join('')}</div>`:''}`;
 }
+function forceResetSession(){
+  openConfirm('セッションを強制リセット',
+    '現在のセッションデータをFirebaseから強制的に削除します。対局記録は失われます。本当によろしいですか？',
+    ()=>{
+      closeModal('m-confirm');
+      if(fbDb&&fbReady){
+        fbDb.ref(FB_PATH+'/activeSession').remove()
+          .then(()=>{A.activeSession=null;updateHdrBadge();renderSession();toast('セッションを強制リセットしました');})
+          .catch(e=>toast('エラー: '+e.message));
+      } else {
+        A.activeSession=null;saveApp();updateHdrBadge();renderSession();toast('セッションをリセットしました');
+      }
+    },'強制リセット');
+}
 function renderActiveSession(el){
   const s=A.activeSession;
-  if(!s||!Array.isArray(s.players)||!s.start){el.innerHTML='<div class="empty"><div class="ico">⏳</div><p>セッションデータを読み込み中...</p></div>';return;}
+  if(!s||!Array.isArray(s.players)||!s.start){
+    // 診断ログ（ブラウザのコンソールで確認できます）
+    console.error('[sanma] renderActiveSession loading: activeSession=',JSON.stringify(s));
+    const adminBtn=isAdmin()?`<button class="btn btn-d bsm" style="margin-top:16px" onclick="forceResetSession()">⚠️ 強制リセット（管理者）</button>`:'';
+    el.innerHTML=`<div class="empty"><div class="ico">⏳</div><p>セッションデータを読み込み中...</p><button class="btn btn-s bsm" style="margin-top:12px" onclick="location.reload()">🔄 再読み込み</button>${adminBtn}</div>`;
+    return;
+  }
   if(!Array.isArray(s.games))s.games=[];
   const players=s.players.map(pid=>playerById(pid));const startStr=s.start.slice(5,10).replace('-','/')+' '+s.start.slice(11,16);
   el.innerHTML=`<div class="sess-header"><div class="sess-status"><div class="sess-dot"></div> セッション進行中</div>
@@ -2344,10 +2364,12 @@ function renderSettings(){
         <p style="font-size:12px;color:var(--sub);margin-bottom:10px">一般ユーザーとして表示中です。</p>
         <button class="btn btn-p bsm" onclick="togglePreviewMode()">← 管理者モードに戻る</button></div>`;
     } else if(admin||adminMode){
+      const sessBtn=A.activeSession?`<button class="btn btn-d bsm" style="margin-top:8px;width:100%" onclick="forceResetSession()">⚠️ セッションを強制終了</button>`:'';
       adminCard.innerHTML=`<div class="card"><div class="ctitle">🔑 管理者モード</div>
         <p style="font-size:12px;color:var(--sub);margin-bottom:10px">管理者モードが有効です。再開・編集・削除が可能です。</p>
         ${currentUser?.admin?`<button class="btn btn-s bsm" onclick="togglePreviewMode()" style="margin-bottom:8px">👁 一般ユーザーモードで確認</button>`:''}
         ${!currentUser?.admin?`<button class="btn btn-d bsm" onclick="revokeAdmin()">管理者モードを解除</button>`:''}
+        ${sessBtn}
       </div>`;
     } else {
       adminCard.innerHTML=`<div class="card"><div class="ctitle">🔑 管理者ログイン</div>
