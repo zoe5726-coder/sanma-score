@@ -620,16 +620,51 @@ function loadUiState(){
   }}catch(e){}
 }
 function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
+// Firebase は配列を {"0":v0,"1":v1,...} のオブジェクトとして保存することがある。
+// 連続整数キーのオブジェクトを配列に変換するヘルパー。
+function _fbArr(v,fallback){
+  if(Array.isArray(v))return v;
+  if(v&&typeof v==='object')return Object.keys(v).sort((a,b)=>Number(a)-Number(b)).map(k=>v[k]);
+  return fallback||[];
+}
 function mergeRemote(data){
   if(!data||typeof data!=='object')return;
   // Firebaseはnullフィールドをimplicit削除するため、キーなし＝null
   if(!('activeSession' in data))data={...data,activeSession:null};
+  // activeSession のネスト配列を安全に復元（players・games・各ゲームの選手データ）
+  let safeActiveSession=data.activeSession;
+  if(safeActiveSession&&typeof safeActiveSession==='object'){
+    const players=_fbArr(safeActiveSession.players,A.activeSession?.players||[]);
+    const rawGames=_fbArr(safeActiveSession.games,A.activeSession?.games||[]);
+    // 各ゲームも [timestamp, [[pid,pts,rank,tobi],...]] 形式に正規化
+    const games=rawGames.map(g=>{
+      if(!g)return g;
+      const gArr=Array.isArray(g)?g:_fbArr(g,[]);
+      const ts=gArr[0]||'';
+      const playerData=_fbArr(gArr[1],null);
+      const normalizedPd=playerData?playerData.map(pd=>Array.isArray(pd)?pd:_fbArr(pd,[])):[];
+      return[ts,normalizedPd];
+    });
+    safeActiveSession={...safeActiveSession,players,games,chips:safeActiveSession.chips||{}};
+  }
   // 型バリデーション（壊れたデータがFirebaseから来ても安全に扱う）
-  const safeSessions=Array.isArray(data.completedSessions)?data.completedSessions.filter(s=>s&&typeof s==='object'&&s.id&&s.start&&Array.isArray(s.games)):A.completedSessions;
+  const normalizeSession=s=>{
+    if(!s||typeof s!=='object')return null;
+    const games=_fbArr(s.games,[]).map(g=>{
+      if(!g)return g;
+      const gArr=Array.isArray(g)?g:_fbArr(g,[]);
+      const ts=gArr[0]||'';
+      const pd=_fbArr(gArr[1],null);
+      return[ts,pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+    });
+    return{...s,games,players:_fbArr(s.players,[]),chips:s.chips||{}};
+  };
+  const rawSessions=_fbArr(data.completedSessions,null);
+  const safeSessions=rawSessions?rawSessions.map(normalizeSession).filter(s=>s&&s.id&&s.start):A.completedSessions;
   const safePlayers=Array.isArray(data.newPlayers)?data.newPlayers.filter(p=>p&&typeof p==='object'&&p.id!=null&&p.name):A.newPlayers;
   const safeFavs=Array.isArray(data.favorites)?data.favorites:A.favorites;
   const safeSettings=data.settings&&typeof data.settings==='object'?{...A.settings,...data.settings}:A.settings;
-  A={...A,...data,completedSessions:safeSessions,newPlayers:safePlayers,favorites:safeFavs,settings:safeSettings};
+  A={...A,...data,activeSession:safeActiveSession,completedSessions:safeSessions,newPlayers:safePlayers,favorites:safeFavs,settings:safeSettings};
   // 重複セッションを除去（IDが同じものは最初の1件だけ残す）
   const seen=new Set();
   A.completedSessions=A.completedSessions.filter(s=>{
