@@ -2090,7 +2090,27 @@ async function shareStatsTable(){
     },'image/png');
   }catch(e){if(wrap.parentNode)document.body.removeChild(wrap);toast('画像生成に失敗しました: '+e.message);}
 }
-function adminDeleteSession(id){openConfirm('セッションを削除','このセッションを削除しますか？',()=>{A.completedSessions=A.completedSessions.filter(x=>x.id!==id);saveApp();closeModal('m-confirm');closeModal('m-sess-detail');renderSession();toast('削除しました');},'削除');}
+function adminDeleteSession(id){
+  openConfirm('セッションを削除','このセッションを削除しますか？',()=>{
+    A.completedSessions=A.completedSessions.filter(x=>x.id!==id);
+    closeModal('m-confirm');closeModal('m-sess-detail');renderSession();
+    if(fbDb&&fbReady){
+      // saveApp()のマージロジックは「サーバーにしかないIDを保持」するため
+      // 削除したIDが復活してしまう。削除専用transactionで明示的に除去する。
+      _skipRemoteCount++;
+      fbDb.ref(FB_PATH).transaction(cur=>{
+        if(!cur)return;
+        const rawSrv=cur.completedSessions;
+        const srvArr=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
+        return{...cur,completedSessions:srvArr.filter(s=>s&&s.id!==id)};
+      },(err,committed,snap)=>{
+        if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
+        if(committed&&snap&&snap.val())mergeRemote(snap.val());
+        toast('削除しました');
+      });
+    } else {saveApp();toast('削除しました');}
+  },'削除');
+}
 function resumeSession(id){
   if(A.activeSession){toast('セッションが進行中です。先に終了してください。');return;}
   const idx=A.completedSessions.findIndex(x=>x.id===id);if(idx===-1)return;
@@ -2196,9 +2216,51 @@ function saveEditGame(){
 function deleteGame(sessId,gameIdx){
   const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
   openConfirm('対局を削除','この対局を削除しますか？',()=>{
-    if(isActiveSess){if(A.activeSession)A.activeSession.games.splice(gameIdx,1);saveApp();closeModal('m-confirm');renderSession();}
-    else{const sess=A.completedSessions.find(x=>x.id===sessId);if(sess){sess.games.splice(gameIdx,1);saveApp();}closeModal('m-confirm');openSessDetail(sessId);}
-    toast('削除しました');
+    const gameTs=isActiveSess
+      ?(A.activeSession.games[gameIdx]||[])[0]
+      :((A.completedSessions.find(x=>x.id===sessId)?.games||[])[gameIdx]||[])[0];
+    if(isActiveSess){
+      if(A.activeSession)A.activeSession.games.splice(gameIdx,1);
+      closeModal('m-confirm');renderSession();
+    } else {
+      const sess=A.completedSessions.find(x=>x.id===sessId);
+      if(sess)sess.games.splice(gameIdx,1);
+      closeModal('m-confirm');openSessDetail(sessId);
+    }
+    if(fbDb&&fbReady){
+      // saveApp()のゲーム数比較マージが削除を復活させるため、専用transactionで削除する
+      // gameTs（タイムスタンプ）でインデックスがサーバーとずれていないか確認してから削除
+      _skipRemoteCount++;
+      if(isActiveSess){
+        fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+          if(!cur||cur.id!==sessId)return;
+          const g=Array.isArray(cur.games)?cur.games:Object.values(cur.games||{});
+          if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return; // タイムスタンプ不一致→中止
+          g.splice(gameIdx,1);return{...cur,games:g};
+        },(err,committed,snap)=>{
+          if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(!committed)toast('⚠ 対局が変更されました。再度お試しください');return;}
+          if(A.activeSession&&snap&&snap.val())A.activeSession=snap.val();
+          renderSession();toast('削除しました');
+        });
+      } else {
+        fbDb.ref(FB_PATH).transaction(cur=>{
+          if(!cur)return;
+          const rawSrv=cur.completedSessions;
+          const srvSess=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
+          const updated=srvSess.map(s=>{
+            if(!s||s.id!==sessId)return s;
+            const g=Array.isArray(s.games)?s.games:Object.values(s.games||{});
+            if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return s; // タイムスタンプ不一致→このセッションは変更しない
+            g.splice(gameIdx,1);return{...s,games:g};
+          });
+          return{...cur,completedSessions:updated};
+        },(err,committed,snap)=>{
+          if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
+          if(committed&&snap&&snap.val())mergeRemote(snap.val());
+          toast('削除しました');
+        });
+      }
+    } else {saveApp();toast('削除しました');}
   },'削除');
 }
 function moveGame(sessId,idx,dir){
@@ -2597,7 +2659,24 @@ function openAddPlayer(){document.getElementById('m-player-title').textContent='
 function openEditPlayer(id){const p=A.newPlayers.find(x=>x.id===id);if(!p)return;document.getElementById('m-player-title').textContent='編集';document.getElementById('m-pid').value=id;document.getElementById('m-pname').value=p.name;mColor=p.color;buildColorPicker();document.getElementById('m-player').classList.add('on');}
 function buildColorPicker(){document.getElementById('m-colors').innerHTML=PCOLORS.map(c=>`<div class="csw${c===mColor?' on':''}" style="background:${c}" onclick="mColor='${c}';buildColorPicker()"></div>`).join('');}
 function savePlayer(){const name=document.getElementById('m-pname').value.trim();if(!name){toast('名前を入力してください');return;}const id=document.getElementById('m-pid').value;if(id){const p=A.newPlayers.find(x=>x.id===parseInt(id));if(p){p.name=name;p.color=mColor;}}else A.newPlayers.push({id:Date.now(),name,color:mColor});saveApp();closeModal('m-player');renderSettings();toast(id?'更新':'追加しました');}
-function delPlayer(id){openConfirm('プレイヤーを削除','削除しますか？',()=>{A.newPlayers=A.newPlayers.filter(x=>x.id!==id);saveApp();closeModal('m-confirm');renderSettings();toast('削除しました');},'削除');}
+function delPlayer(id){
+  openConfirm('プレイヤーを削除','削除しますか？',()=>{
+    A.newPlayers=A.newPlayers.filter(x=>x.id!==id);
+    closeModal('m-confirm');renderSettings();
+    if(fbDb&&fbReady){
+      _skipRemoteCount++;
+      fbDb.ref(FB_PATH).transaction(cur=>{
+        if(!cur)return;
+        const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
+        return{...cur,newPlayers:srvP.filter(p=>p&&p.id!==id)};
+      },(err,committed,snap)=>{
+        if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
+        if(committed&&snap&&snap.val())mergeRemote(snap.val());
+        toast('削除しました');
+      });
+    } else {saveApp();toast('削除しました');}
+  },'削除');
+}
 
 // ══ MODAL UTILS ══
 function openConfirm(title,msg,fn,btnLabel){document.getElementById('m-ctitle').textContent=title;document.getElementById('m-cmsg').textContent=msg;document.getElementById('m-cok').textContent=btnLabel||'実行';document.getElementById('m-cok').onclick=fn;document.getElementById('m-confirm').classList.add('on');}
