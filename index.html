@@ -191,6 +191,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sess-item:last-child{border-bottom:none}
 .sess-info{flex:1;min-width:0}.sess-date{font-size:12px;font-weight:600}
 .sess-meta{font-size:10px;color:var(--sub);margin-top:2px}
+.sess-rank{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px}
+.sr-item{display:flex;align-items:center;gap:2px;font-size:10px}
+.sr-rank{color:var(--sub);font-size:9px;min-width:18px}
+.sr-name{color:var(--tx);max-width:52px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr-pts{font-weight:700;font-size:10px;min-width:36px;text-align:right}
+.sess-more-wrap{text-align:center;padding:8px 0 2px}
 .admin-badge{display:inline-block;padding:2px 8px;background:rgba(239,68,68,.15);border:1px solid var(--red);border-radius:8px;font-size:10px;color:var(--red);font-weight:600;margin-bottom:8px}
 .game-admin-btns{display:flex;gap:3px;justify-content:center}
 .gab{padding:3px 5px;background:var(--sf2);border:1px solid var(--bd);border-radius:4px;color:var(--tx);cursor:pointer;font-size:11px;line-height:1}
@@ -1301,18 +1307,21 @@ function chipInput(pid,value){
   const tempSess={...A.activeSession,chips:{...A.activeSession.chips,[String(pid)]:num}};
   const statsEl=document.getElementById('sess-stats-card');if(statsEl)statsEl.innerHTML=buildSessionStats(tempSess,{firstColW:72});
 }
+let _chipSaveTimer=null;
 function chipBlur(pid,value){
   if(!A.activeSession)return;
   const num=parseInt(value)||0;
   A.activeSession.chips[String(pid)]=num;
-  if(fbDb&&fbReady){
-    // 自分のチップ書き込みによる再描画を防ぐ（chips/pidへの部分更新もon('value')を発火するため）
-    _skipRemoteCount++;
-    fbDb.ref(`${FB_PATH}/activeSession/chips/${pid}`).set(num)
-      .catch(e=>{if(_skipRemoteCount>0)_skipRemoteCount--;console.error('chip save error',e);});
-  } else {
-    localStorage.setItem('sanma-v2',JSON.stringify(A));
-  }
+  // 部分書き込み（activeSession/chips/pid）をやめて全体saveAppに統一。
+  // 部分書き込みはセッション終了後に到着すると、nullになったactiveSessionを
+  // {chips:...}だけで再生成してしまうバグの原因になるため。
+  clearTimeout(_chipSaveTimer);
+  const sessId=A.activeSession.id;
+  _chipSaveTimer=setTimeout(()=>{
+    // セッションが既に終了していたら保存しない
+    if(!A.activeSession||A.activeSession.id!==sessId)return;
+    saveApp();
+  },400);
 }
 function toggleChipSign(id,pid){
   const el=document.getElementById(id);if(!el)return;
@@ -1330,20 +1339,39 @@ function toggleCompletedChipSign(id,sessId,pid){
 function renderSession(){const el=document.getElementById('sess-content');if(A.activeSession){renderActiveSession(el);}else{removeStickyHeader();renderNoSession(el);}}
 function renderNoSession(el){
   const completed=[...A.completedSessions].filter(s=>s&&s.start&&Array.isArray(s.games)&&Array.isArray(s.players)).sort((a,b)=>b.start.localeCompare(a.start));
+  function sessRanking(s){
+    const totals={};
+    (s.players||[]).forEach(pid=>{totals[String(pid)]=0;});
+    (s.games||[]).forEach(g=>{
+      if(!g||!Array.isArray(g[1]))return;
+      g[1].forEach(r=>{if(!r||r[0]==null)return;totals[String(r[0])]=(totals[String(r[0])]||0)+(r[1]||0);});
+    });
+    return(s.players||[]).map(pid=>({pid,tot:totals[String(pid)]||0})).sort((a,b)=>b.tot-a.tot);
+  }
+  function sessItemHtml(s){
+    const d=s.start.slice(0,10).replace(/-/g,'/');const endD=s.end?s.end.slice(0,10):null;
+    const dateStr=endD&&endD!==s.start.slice(0,10)?`${d}〜${endD.slice(5).replace('-','/')}`:d;
+    const ranking=sessRanking(s);
+    const rankHtml=ranking.slice(0,3).map((r,i)=>{
+      const name=esc(playerById(r.pid).name);const pts=r.tot>=0?`+${r.tot}`:`${r.tot}`;
+      return`<span class="sr-item"><span class="sr-rank">${i+1}位</span><span class="sr-name">${name}</span><span class="sr-pts ${r.tot>=0?'pos':'neg'}">${pts}</span></span>`;
+    }).join('');
+    return`<div class="sess-item"><div class="sess-info"><div class="sess-date">${dateStr} ${s.start.slice(11,16)}〜${s.end?s.end.slice(11,16):''} <span style="font-weight:400;color:var(--sub)">${(s.games||[]).length}局</span></div><div class="sess-rank">${rankHtml}</div></div>
+      <button class="btn btn-s bxsm" onclick="openSessDetail('${s.id}')">詳細</button>
+      ${isAdmin()?`<button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>`:''}
+    </div>`;
+  }
+  const LIMIT=30;
+  const recent=completed.slice(0,LIMIT);
+  const older=completed.slice(LIMIT);
+  const olderHtml=older.length>0?`<div class="sess-more-wrap"><button class="btn btn-s bsm" onclick="(function(btn){btn.parentElement.nextElementSibling.style.display='block';btn.parentElement.style.display='none';})(this)">📂 過去のセッションをさらに表示（${older.length}件）</button></div><div style="display:none">${older.map(sessItemHtml).join('')}</div>`:'';
   el.innerHTML=`<div class="card" style="text-align:center;padding:24px">
     <div style="margin-bottom:10px;display:flex;justify-content:center"><svg width="54" height="54" viewBox="0 0 54 54" fill="none" xmlns="http://www.w3.org/2000/svg"><ellipse cx="27" cy="48" rx="6" ry="3" fill="#2a1008"/><rect x="24.5" y="38" width="5" height="11" rx="1.5" fill="#3a1a08"/><path d="M5 25 L5 33 L27 39 L27 31 Z" fill="#6b3010"/><path d="M49 25 L49 33 L27 39 L27 31 Z" fill="#4a2008"/><path d="M5 25 L27 17 L49 25 L27 33 Z" fill="#8b4513"/><path d="M10 25 L27 18.5 L44 25 L27 31.5 Z" fill="#267040"/><path d="M10 25 L27 31.5 L27 33 L10 26.5 Z" fill="#1c5030"/><path d="M44 25 L27 31.5 L27 33 L44 26.5 Z" fill="#163f26"/><ellipse cx="27" cy="25" rx="4.5" ry="2.5" fill="#f2ece0" opacity=".95"/><circle cx="25" cy="24.8" r="1" fill="#777"/><circle cx="29" cy="24.8" r="1" fill="#777"/></svg></div>
     <p style="color:var(--sub);font-size:13px;margin-bottom:16px">セッションを開始して対局を記録しましょう</p>
     <button class="btn btn-p" onclick="openStartSession()" style="margin-bottom:8px">セッションを開始</button>
     ${isAdmin()?`<button class="btn btn-s" onclick="openBulkImport()">📋 一括セッション登録</button>`:''}
   </div>
-  ${completed.length>0?`<div class="card"><div class="ctitle">📋 過去のセッション</div>${completed.map(s=>{
-    const d=s.start.slice(0,10).replace(/-/g,'/');const endD=s.end?s.end.slice(0,10):null;
-    const dateStr=endD&&endD!==s.start.slice(0,10)?`${d}〜${endD.slice(5).replace('-','/')}`:d;
-    const pNames=(s.players||[]).slice(0,4).map(pid=>esc(playerById(pid).name)).join(' · ');
-    return`<div class="sess-item"><div class="sess-info"><div class="sess-date">${dateStr} ${s.start.slice(11,16)}〜${s.end?s.end.slice(11,16):''}</div><div class="sess-meta">${pNames} | ${(s.games||[]).length}局</div></div>
-      <button class="btn btn-s bxsm" onclick="openSessDetail('${s.id}')">詳細</button>
-      ${isAdmin()?`<button class="btn btn-o bxsm" onclick="resumeSession('${s.id}')" style="margin-left:4px">▶ 再開</button>`:''}
-    </div>`;}).join('')}</div>`:''}`;
+  ${completed.length>0?`<div class="card"><div class="ctitle">📋 過去のセッション</div>${recent.map(sessItemHtml).join('')}${olderHtml}</div>`:''}`;
 }
 function forceResetSession(){
   openConfirm('セッションを強制リセット',
