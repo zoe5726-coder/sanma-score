@@ -737,8 +737,37 @@ function saveApp(){
   invalidateStatsCache();
   if(fbDb&&fbReady){
     _skipRemoteCount++;setSyncStatus('syncing','保存中...');
-    fbDb.ref(FB_PATH).set(A).then(()=>setSyncStatus('synced','同期済み'))
-      .catch(e=>{if(_skipRemoteCount>0)_skipRemoteCount--;setSyncStatus('offline','保存エラー: '+e.code);toast('⚠ 保存に失敗しました。再試行中...');setTimeout(()=>saveApp(),3000);});
+    // set()ではなくtransactionで「読んでからマージして書く」を保証する。
+    // これにより他ユーザーがトランザクションで追加したゲームや完了セッションを上書き消去しない。
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return A; // 初回書き込み
+      // ── completedSessions: サーバーにしかないIDはローカルが知らなくても消さない ──
+      const localIds=new Set((A.completedSessions||[]).map(s=>s&&s.id));
+      const rawSrv=cur.completedSessions;
+      const srvArr=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
+      const serverExtras=srvArr.filter(s=>s&&s.id&&!localIds.has(s.id));
+      const mergedCompleted=[...serverExtras,...(A.completedSessions||[])]
+        .sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+      // ── activeSession/games: 同じセッションならゲーム数の多い方を優先 ──
+      let mergedActive=A.activeSession;
+      if(A.activeSession&&cur.activeSession&&cur.activeSession.id===A.activeSession.id){
+        const srvGames=Array.isArray(cur.activeSession.games)
+          ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
+        if(srvGames.length>(A.activeSession.games||[]).length)
+          mergedActive={...A.activeSession,games:srvGames};
+      }
+      return{...A,completedSessions:mergedCompleted,activeSession:mergedActive};
+    },(err,committed,snap)=>{
+      if(err){
+        if(_skipRemoteCount>0)_skipRemoteCount--;
+        setSyncStatus('offline','保存エラー: '+err.code);
+        toast('⚠ 保存に失敗しました。再試行中...');
+        setTimeout(()=>saveApp(),3000);
+        return;
+      }
+      if(committed&&snap&&snap.val())mergeRemote(snap.val());
+      setSyncStatus('synced','同期済み');
+    });
   } else {try{localStorage.setItem('sanma-v2',JSON.stringify(A));}catch(e){toast('⚠ ローカル保存エラー: ストレージ容量不足');}}
 }
 // Firebase更新を受けた後の再描画をデバウンス（連続更新でのジャンク防止）
