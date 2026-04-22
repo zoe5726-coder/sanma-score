@@ -1346,6 +1346,8 @@ function renderNoSession(el){
       if(!g||!Array.isArray(g[1]))return;
       g[1].forEach(r=>{if(!r||r[0]==null)return;totals[String(r[0])]=(totals[String(r[0])]||0)+(r[1]||0);});
     });
+    const chips=s.chips||{};
+    Object.entries(chips).forEach(([k,v])=>{if(totals[k]!==undefined)totals[k]+=(parseInt(v)||0);});
     return(s.players||[]).map(pid=>({pid,tot:totals[String(pid)]||0})).sort((a,b)=>b.tot-a.tot);
   }
   function sessItemHtml(s){
