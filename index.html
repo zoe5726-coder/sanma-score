@@ -748,15 +748,26 @@ function saveApp(){
       const serverExtras=srvArr.filter(s=>s&&s.id&&!localIds.has(s.id));
       const mergedCompleted=[...serverExtras,...(A.completedSessions||[])]
         .sort((a,b)=>(a.start||'').localeCompare(b.start||''));
-      // ── activeSession/games: 同じセッションならゲーム数の多い方を優先 ──
+      // ── activeSession: 同じセッションならゲーム・チップ両方をサーバー値とマージ ──
       let mergedActive=A.activeSession;
       if(A.activeSession&&cur.activeSession&&cur.activeSession.id===A.activeSession.id){
         const srvGames=Array.isArray(cur.activeSession.games)
           ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
-        if(srvGames.length>(A.activeSession.games||[]).length)
-          mergedActive={...A.activeSession,games:srvGames};
+        // チップ: サーバー値ベースにローカル変更を上書き（他プレイヤーのチップを消さない）
+        const srvChips=cur.activeSession.chips||{};
+        const localChips=A.activeSession.chips||{};
+        const mergedChips={...srvChips,...localChips};
+        // ゲーム数はサーバーの多い方を優先（他ユーザーが追加した対局を消さない）
+        const mergedGames=srvGames.length>(A.activeSession.games||[]).length
+          ?srvGames:(A.activeSession.games||[]);
+        mergedActive={...A.activeSession,chips:mergedChips,games:mergedGames};
       }
-      return{...A,completedSessions:mergedCompleted,activeSession:mergedActive};
+      // ── newPlayers: サーバーにしかいないプレイヤーは消さない ──
+      const localPids=new Set((A.newPlayers||[]).map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
+      const srvPlayers=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
+      const serverOnlyPlayers=srvPlayers.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
+      const mergedPlayers=[...(A.newPlayers||[]),...serverOnlyPlayers];
+      return{...A,completedSessions:mergedCompleted,activeSession:mergedActive,newPlayers:mergedPlayers};
     },(err,committed,snap)=>{
       if(err){
         if(_skipRemoteCount>0)_skipRemoteCount--;
@@ -2678,8 +2689,11 @@ function kbKey(k){
   if(_kbIsChip&&_kbChipCountMode){
     const rate=A.settings?.chipRate||5;const cnt=parseInt(v)||0;
     _npSetHint(cnt?`${cnt}枚 = ${cnt*rate}P`:`枚数で入力（1枚=${rate}P）`,true);
+    // 枚数モード中はchangeFnにP値（枚数×レート）で通知する（枚数のままだと集計に枚数が入るバグの防止）
+    if(_kbChangeFn)_kbChangeFn(String(cnt*rate));
+  } else {
+    if(_kbChangeFn)_kbChangeFn(v);
   }
-  if(_kbChangeFn)_kbChangeFn(v);
 }
 function kbOK(){
   if(!_kbEl)return;
