@@ -707,17 +707,16 @@ function loadApp(){
           ?{...A.activeSession.chips}:{};
         const hadActive=!!A.activeSession;
         mergeRemote(data);
-        // ローカルで入力済みのチップが0またはundefinedのリモートデータで上書きされた場合は復元して再書込み
+        // ローカルで入力済みのチップが0またはundefinedのリモートデータで上書きされた場合は復元
+        // 部分書き込み（chips/pid）は使わずsaveApp()のtransactionで安全にマージする
         if(A.activeSession&&Object.keys(localChips).length){
           let dirty=false;
           Object.entries(localChips).forEach(([pid,val])=>{
             if(val!==0&&!A.activeSession.chips[pid]){
-              A.activeSession.chips[pid]=val;
-              fbDb.ref(`${FB_PATH}/activeSession/chips/${pid}`).set(val).catch(()=>{});
-              dirty=true;
+              A.activeSession.chips[pid]=val;dirty=true;
             }
           });
-          if(dirty)_skipRemoteCount++;
+          if(dirty)saveApp(); // saveApp内のtransactionがチップをマージして書き戻す
         }
         const hasActive=!!A.activeSession;
         refreshCurrentTab();updateHdrBadge();
@@ -1368,7 +1367,32 @@ function toggleChipSign(id,pid){
   const v=parseInt(el.value);if(isNaN(v)||v===0)return;
   el.value=String(-v);kbSync(el);chipInput(pid,el.value);chipBlur(pid,el.value);
 }
-function updateCompletedChip(sessId,pid,value){const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!isAdmin())return;sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;saveApp();const ptTot=sess.games.reduce((acc,g)=>{const gp=g[1].find(x=>x[0]===pid);return acc+(gp?gp[1]:0);},0);const tot=ptTot+(parseInt(value)||0);const cell=document.getElementById(`totalP-${sessId}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}}
+function updateCompletedChip(sessId,pid,value){
+  const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!isAdmin())return;
+  sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;
+  // 完了済みセッションのチップ更新: transactionで当該セッションのチipsだけをマージ書き込み（他管理者の変更を消さない）
+  if(fbDb&&fbReady){
+    _skipRemoteCount++;
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return;
+      const rawSrv=cur.completedSessions;
+      const srvSessions=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
+      const updated=srvSessions.map(s=>{
+        if(!s||s.id!==sessId)return s;
+        // サーバーの同セッションのチップにローカル変更だけを上書き
+        return{...s,chips:{...(s.chips||{}),[String(pid)]:parseInt(value)||0}};
+      });
+      return{...cur,completedSessions:updated};
+    },(err,committed,snap)=>{
+      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('保存エラー: '+err.message);return;}
+      if(committed&&snap&&snap.val())mergeRemote(snap.val());
+      setSyncStatus('synced','同期済み');
+    });
+  } else {saveApp();}
+  const ptTot=sess.games.reduce((acc,g)=>{const gp=Array.isArray(g[1])?g[1].find(x=>x[0]===pid):null;return acc+(gp?gp[1]:0);},0);
+  const tot=ptTot+(parseInt(value)||0);
+  const cell=document.getElementById(`totalP-${sessId}-${pid}`);if(cell){cell.textContent=(tot>=0?'+':'')+tot;cell.className=tot>=0?'pos':'neg';}
+}
 function toggleCompletedChipSign(id,sessId,pid){
   const el=document.getElementById(id);if(!el)return;
   const v=parseInt(el.value);if(isNaN(v)||v===0)return;
