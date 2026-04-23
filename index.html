@@ -464,7 +464,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260423-0920';
+const APP_VERSION = 'v14-20260423-0922';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -2634,7 +2634,7 @@ function renderVersionCard(){
 function publishVersion(){
   if(!fbDb||!fbReady){toast('Firebase未接続');return;}
   openConfirm('バージョンを公開',
-    \`現在のバージョン（${APP_VERSION}）を最新版として全ユーザーに通知しますか？\\n古いバージョンを使っているユーザーに更新ボタンが表示されます。\`,
+    '現在のバージョン（'+APP_VERSION+'）を最新版として全ユーザーに通知しますか？\n古いバージョンを使っているユーザーに更新ボタンが表示されます。',
     ()=>{
       closeModal('m-confirm');
       fbDb.ref('config/latestVersion').set(APP_VERSION)
@@ -2648,9 +2648,8 @@ function checkLatestVersion(){
     const v=snap.val();if(!v)return;
     window._latestVersion=v;
     renderVersionCard();
-    // 古いバージョンを使っていたらバナーで通知
     if(v!==APP_VERSION){
-      showSyncBanner(\`⚠️ 新しいバージョン（\${v}）があります。設定画面から更新できます。\`);
+      showSyncBanner('⚠️ 新しいバージョン（'+v+'）があります。設定画面から更新できます。');
     }
   });
 }
