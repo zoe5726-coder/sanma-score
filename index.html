@@ -464,7 +464,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260423-0917';
+const APP_VERSION = 'v14-20260423-0920';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -2625,7 +2625,7 @@ function renderVersionCard(){
   el.innerHTML=`<div class="ctitle">📦 バージョン情報</div>
     <div style="font-size:12px;line-height:2">
       <div>現在のバージョン: <b style="color:var(--tx);font-family:monospace">${APP_VERSION}</b></div>
-      <div>最新バージョン: <b style="color:${isOutdated?'var(--red)':'var(--ac)';font-family:monospace}">${latest||'確認中...'}</b></div>
+      <div>最新バージョン: <b style="color:${isOutdated?'var(--red)':'var(--ac)'};font-family:monospace">${latest||'確認中...'}</b></div>
     </div>
     ${isOutdated?`<button class="btn btn-p bsm" style="margin-top:10px;width:100%" onclick="location.reload(true)">🔄 最新版に更新する</button>`:''}
     ${isAdmin()&&!isOutdated&&latest?`<p style="font-size:10px;color:var(--sub);margin-top:6px">✅ 最新版を使用中</p>`:''}
