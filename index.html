@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260423-1001';
+const APP_VERSION = 'v14-20260424-2304';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -744,37 +744,40 @@ function saveApp(){
   invalidateStatsCache();
   if(fbDb&&fbReady){
     _skipRemoteCount++;setSyncStatus('syncing','保存中...');
-    // set()ではなくtransactionで「読んでからマージして書く」を保証する。
-    // これにより他ユーザーがトランザクションで追加したゲームや完了セッションを上書き消去しない。
+    // ── 呼び出し時点の状態をスナップショット ──
+    // transactionがリトライ中にmergeRemote()がAを上書きしても、
+    // このsaveApp呼び出しで意図した変更が消えないようにする
+    const snapPlayers=(A.newPlayers||[]).map(p=>({...p}));
+    const snapSettings={...A.settings};
+    const snapFavs=[...(A.favorites||[])];
+    const snapSessions=(A.completedSessions||[]).map(s=>s);
+    const snapActive=A.activeSession
+      ?{...A.activeSession,chips:{...(A.activeSession.chips||{})},games:[...(A.activeSession.games||[])]}
+      :null;
     fbDb.ref(FB_PATH).transaction(cur=>{
       if(!cur)return A; // 初回書き込み
-      // ── completedSessions: サーバーにしかないIDはローカルが知らなくても消さない ──
-      const localIds=new Set((A.completedSessions||[]).map(s=>s&&s.id));
-      const rawSrv=cur.completedSessions;
-      const srvArr=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
+      // ── completedSessions: サーバーにしかないIDは消さない ──
+      const localIds=new Set(snapSessions.map(s=>s&&s.id));
+      const srvArr=Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});
       const serverExtras=srvArr.filter(s=>s&&s.id&&!localIds.has(s.id));
-      const mergedCompleted=[...serverExtras,...(A.completedSessions||[])]
+      const mergedCompleted=[...serverExtras,...snapSessions]
         .sort((a,b)=>(a.start||'').localeCompare(b.start||''));
-      // ── activeSession: 同じセッションならゲーム・チップ両方をサーバー値とマージ ──
-      let mergedActive=A.activeSession;
-      if(A.activeSession&&cur.activeSession&&cur.activeSession.id===A.activeSession.id){
+      // ── activeSession: ゲーム・チップ両方をサーバー値とマージ ──
+      let mergedActive=snapActive;
+      if(snapActive&&cur.activeSession&&cur.activeSession.id===snapActive.id){
         const srvGames=Array.isArray(cur.activeSession.games)
           ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
-        // チップ: サーバー値ベースにローカル変更を上書き（他プレイヤーのチップを消さない）
-        const srvChips=cur.activeSession.chips||{};
-        const localChips=A.activeSession.chips||{};
-        const mergedChips={...srvChips,...localChips};
-        // ゲーム数はサーバーの多い方を優先（他ユーザーが追加した対局を消さない）
-        const mergedGames=srvGames.length>(A.activeSession.games||[]).length
-          ?srvGames:(A.activeSession.games||[]);
-        mergedActive={...A.activeSession,chips:mergedChips,games:mergedGames};
+        const mergedChips={...(cur.activeSession.chips||{}),...(snapActive.chips||{})};
+        const mergedGames=srvGames.length>(snapActive.games||[]).length?srvGames:(snapActive.games||[]);
+        mergedActive={...snapActive,chips:mergedChips,games:mergedGames};
       }
       // ── newPlayers: サーバーにしかいないプレイヤーは消さない ──
-      const localPids=new Set((A.newPlayers||[]).map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
+      const localPids=new Set(snapPlayers.map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
       const srvPlayers=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
       const serverOnlyPlayers=srvPlayers.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
-      const mergedPlayers=[...(A.newPlayers||[]),...serverOnlyPlayers];
-      return{...A,completedSessions:mergedCompleted,activeSession:mergedActive,newPlayers:mergedPlayers};
+      const mergedPlayers=[...snapPlayers,...serverOnlyPlayers];
+      return{...A,settings:snapSettings,favorites:snapFavs,
+        completedSessions:mergedCompleted,activeSession:mergedActive,newPlayers:mergedPlayers};
     },(err,committed,snap)=>{
       if(err){
         if(_skipRemoteCount>0)_skipRemoteCount--;
@@ -2724,7 +2727,43 @@ function removeAllowedUser(key){openConfirm('ユーザーを削除','このユ�
 function openAddPlayer(){document.getElementById('m-player-title').textContent='プレイヤーを追加';document.getElementById('m-pid').value='';document.getElementById('m-pname').value='';mColor=PCOLORS[0];buildColorPicker();document.getElementById('m-player').classList.add('on');setTimeout(()=>document.getElementById('m-pname').focus(),150);}
 function openEditPlayer(id){const p=A.newPlayers.find(x=>x.id===id);if(!p)return;document.getElementById('m-player-title').textContent='編集';document.getElementById('m-pid').value=id;document.getElementById('m-pname').value=p.name;mColor=p.color;buildColorPicker();document.getElementById('m-player').classList.add('on');}
 function buildColorPicker(){document.getElementById('m-colors').innerHTML=PCOLORS.map(c=>`<div class="csw${c===mColor?' on':''}" style="background:${c}" onclick="mColor='${c}';buildColorPicker()"></div>`).join('');}
-function savePlayer(){const name=document.getElementById('m-pname').value.trim();if(!name){toast('名前を入力してください');return;}const id=document.getElementById('m-pid').value;if(id){const p=A.newPlayers.find(x=>x.id===parseInt(id));if(p){p.name=name;p.color=mColor;}}else A.newPlayers.push({id:Date.now(),name,color:mColor});saveApp();closeModal('m-player');renderSettings();toast(id?'更新':'追加しました');}
+function savePlayer(){
+  const name=document.getElementById('m-pname').value.trim();if(!name){toast('名前を入力してください');return;}
+  const idStr=document.getElementById('m-pid').value;
+  const isEdit=!!idStr;
+  const pid=isEdit?parseInt(idStr):Date.now();
+  const player={id:pid,name,color:mColor};
+  // ローカル状態を先に更新
+  if(isEdit){const p=A.newPlayers.find(x=>x.id===pid);if(p){p.name=name;p.color=mColor;}}
+  else A.newPlayers.push(player);
+  if(fbDb&&fbReady){
+    // プレイヤー追加/編集は専用transactionで行う。
+    // saveApp()経由だとリトライ中にmergeRemote()がA.newPlayersを上書きし、追加が消えるため。
+    showLoading(isEdit?'更新中...':'追加中...');
+    _skipRemoteCount++;
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return A;
+      const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
+      if(isEdit){
+        // 編集: 対象IDのエントリだけ更新
+        const updated=srvP.map(p=>p&&p.id===pid?{...p,name,color:mColor}:p);
+        return{...cur,newPlayers:updated};
+      } else {
+        // 追加: 同IDが既にあれば上書き（冪等）、なければ末尾に追加
+        if(srvP.some(p=>p&&p.id===pid))
+          return{...cur,newPlayers:srvP.map(p=>p&&p.id===pid?player:p)};
+        return{...cur,newPlayers:[...srvP,player]};
+      }
+    },(err,committed,snap)=>{
+      hideLoading();
+      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('エラー: '+err.message);return;}
+      if(committed&&snap&&snap.val())mergeRemote(snap.val());
+      closeModal('m-player');renderSettings();toast(isEdit?'更新しました':'追加しました');
+    });
+  } else {
+    saveApp();closeModal('m-player');renderSettings();toast(isEdit?'更新しました':'追加しました');
+  }
+}
 function delPlayer(id){
   openConfirm('プレイヤーを削除','削除しますか？',()=>{
     A.newPlayers=A.newPlayers.filter(x=>x.id!==id);
