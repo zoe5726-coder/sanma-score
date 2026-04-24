@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260424-2304';
+const APP_VERSION = 'v14-20260425-0323';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -762,14 +762,21 @@ function saveApp(){
       const serverExtras=srvArr.filter(s=>s&&s.id&&!localIds.has(s.id));
       const mergedCompleted=[...serverExtras,...snapSessions]
         .sort((a,b)=>(a.start||'').localeCompare(b.start||''));
-      // ── activeSession: ゲーム・チップ両方をサーバー値とマージ ──
-      let mergedActive=snapActive;
-      if(snapActive&&cur.activeSession&&cur.activeSession.id===snapActive.id){
+      // ── activeSession: サーバー状態を優先してマージ ──
+      // ルール: サーバーが null なら null を維持（終了済みを復活させない）
+      //        サーバーと同じセッションならチップ・ゲームをマージ
+      //        サーバーが別セッション（または自分にセッションなし）ならサーバーを使う
+      let mergedActive;
+      if(!cur.activeSession){
+        mergedActive=null; // サーバーで終了済み → 絶対に復活させない
+      } else if(snapActive&&cur.activeSession.id===snapActive.id){
         const srvGames=Array.isArray(cur.activeSession.games)
           ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
         const mergedChips={...(cur.activeSession.chips||{}),...(snapActive.chips||{})};
         const mergedGames=srvGames.length>(snapActive.games||[]).length?srvGames:(snapActive.games||[]);
         mergedActive={...snapActive,chips:mergedChips,games:mergedGames};
+      } else {
+        mergedActive=cur.activeSession; // サーバーの別セッションを維持
       }
       // ── newPlayers: サーバーにしかいないプレイヤーは消さない ──
       const localPids=new Set(snapPlayers.map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
