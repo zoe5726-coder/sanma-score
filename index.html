@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260425-0357';
+const APP_VERSION = 'v14-20260425-1030';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -767,28 +767,28 @@ function saveApp(){
       const srvPlayers=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
       const serverOnlyPlayers=srvPlayers.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
       const mergedPlayers=[...snapPlayers,...serverOnlyPlayers];
-      // ── activeSession: {…cur} をベースにし、同じセッションが続いている場合のみ上書き ──
-      // endSession が null を書いた後に saveApp がリトライしても復活しない。
-      // snapActive && cur.activeSession が同じID → チップ・ゲームをマージして書く
-      // それ以外 → cur.activeSession をそのまま維持（nullも含め）
-      const overrides={settings:snapSettings,favorites:snapFavs,
+      // ── activeSession は saveApp() では書かない ──
+      // activeSession は startSession/saveGameToSession/endSession/chipBlur が
+      // それぞれ専用トランザクションで管理する。
+      // {…cur} をベースにすることでサーバーの activeSession をそのまま維持する。
+      return{...cur,settings:snapSettings,favorites:snapFavs,
         completedSessions:mergedCompleted,newPlayers:mergedPlayers};
-      if(snapActive&&cur.activeSession&&cur.activeSession.id===snapActive.id){
-        const srvGames=Array.isArray(cur.activeSession.games)
-          ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
-        const mergedChips={...(cur.activeSession.chips||{}),...(snapActive.chips||{})};
-        const mergedGames=srvGames.length>(snapActive.games||[]).length?srvGames:(snapActive.games||[]);
-        overrides.activeSession={...cur.activeSession,...snapActive,chips:mergedChips,games:mergedGames};
-      }
-      return{...cur,...overrides};
     },(err,committed,snap)=>{
       if(err){
         if(_skipRemoteCount>0)_skipRemoteCount--;
-        setSyncStatus('offline','保存エラー: '+err.code);
-        toast('⚠ 保存に失敗しました。再試行中...');
-        setTimeout(()=>saveApp(),3000);
+        setSyncStatus('offline','保存エラー: '+(err.code||err.message||err));
+        // リトライ上限を設けて無限ループを防ぐ
+        if((saveApp._failCount=(saveApp._failCount||0)+1)<=5){
+          setTimeout(()=>saveApp(),3000);
+        } else {
+          saveApp._failCount=0;
+          toast('⚠ 保存に繰り返し失敗しました。ページを再読み込みしてください。');
+        }
         return;
       }
+      // commitedがfalseの場合（アボート）も_skipRemoteCountをリセット
+      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;}
+      saveApp._failCount=0;
       if(committed&&snap&&snap.val())mergeRemote(snap.val());
       setSyncStatus('synced','同期済み');
     });
@@ -896,6 +896,10 @@ function updateHdrBadge(){const badge=document.getElementById('hdr-badge'),dot=d
 function go(tab,btn){
   // 数値パッドが開いていたらOKして保存
   const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();
+  // タブ切り替え時にローディング状態をリセット（スタック状態からの回復）
+  hideLoading();
+  // _skipRemoteCountが高い値で詰まっていたら安全にリセット
+  if(_skipRemoteCount>3)_skipRemoteCount=0;
   currentTab=tab;saveUI();
   if(tab!=='session')removeStickyHeader();
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
@@ -1379,10 +1383,15 @@ function chipBlur(pid,value){
   clearTimeout(_chipSaveTimer);
   const sessId=A.activeSession.id;
   _chipSaveTimer=setTimeout(()=>{
-    // saveApp()内のtransactionで「サーバーが同じセッションIDを持つ場合のみ書く」チェックをするため
-    // セッション終了後にsaveApp()が走ってもゾンビ復活しない
+    // ガードチェック: セッションが終了していたら書き込まない（ゾンビ防止）
     if(!A.activeSession||A.activeSession.id!==sessId)return;
-    saveApp();
+    if(fbDb&&fbReady){
+      // トランザクションを使わず set() で直接書き込む。
+      // トランザクションは saveApp() のルートトランザクションと競合して
+      // 「保存に失敗しました」エラーを引き起こすため使用しない。
+      // ゾンビリスク（セッション終了直後の書き込み）は上のガードで最小化している。
+      fbDb.ref(FB_PATH+'/activeSession/chips/'+String(pid)).set(num).catch(()=>{});
+    }
   },400);
 }
 function toggleChipSign(id,pid){
@@ -1579,12 +1588,10 @@ function startSession(){
   if(fbDb&&fbReady){
     setModalLoading('m-start-sess',true,'開始中...');
     _skipRemoteCount++;
-    // ルートパスtransactionで統一（子パスtransactionはsaveApp()と競合する）
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return{...A,activeSession:newSess};
-      if(cur.activeSession)return; // 既に開始済みならアボート
-      return{...cur,activeSession:newSess};
-    },(err,committed,snap)=>{
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(cur!==null&&cur!==undefined)return; // 既に開始済みならアボート
+      return newSess;
+    },(err,committed)=>{
       if(err||!committed){
         if(_skipRemoteCount>0)_skipRemoteCount--;
         setModalLoading('m-start-sess',false);
@@ -1592,7 +1599,6 @@ function startSession(){
         return;
       }
       A.activeSession=newSess;
-      if(snap&&snap.val())mergeRemote(snap.val());
       setModalLoading('m-start-sess',false);
       closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');
     });
@@ -1807,12 +1813,10 @@ function saveGameToSession(){
     const sessId=A.activeSession.id;
     setModalLoading('m-add-game',true,'保存中...');
     _skipRemoteCount++;
-    // ルートパスtransactionで統一
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur||!cur.activeSession||cur.activeSession.id!==sessId)return; // セッション不一致→アボート
-      const srvGames=Array.isArray(cur.activeSession.games)
-        ?cur.activeSession.games:Object.values(cur.activeSession.games||{});
-      return{...cur,activeSession:{...cur.activeSession,games:[...srvGames,game]}};
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(!cur||cur.id!==sessId)return; // セッション不一致→アボート
+      const srvGames=Array.isArray(cur.games)?cur.games:Object.values(cur.games||{});
+      return{...cur,games:[...srvGames,game]};
     },(err,committed,snap)=>{
       if(err||!committed){
         if(_skipRemoteCount>0)_skipRemoteCount--;
@@ -1820,7 +1824,7 @@ function saveGameToSession(){
         toast(committed===false?'⚠ セッションが変更されました。再度お試しください':'保存エラー');
         return;
       }
-      if(snap&&snap.val())mergeRemote(snap.val());
+      if(A.activeSession&&snap&&snap.val())A.activeSession=snap.val();
       setModalLoading('m-add-game',false);
       closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
     });
@@ -2267,17 +2271,15 @@ function deleteGame(sessId,gameIdx){
       showLoading('対局を削除中...');
       _skipRemoteCount++;
       if(isActiveSess){
-        // ルートパスtransactionで統一（子パスtransactionはsaveApp()と競合する）
-        fbDb.ref(FB_PATH).transaction(cur=>{
-          if(!cur||!cur.activeSession||cur.activeSession.id!==sessId)return;
-          const g=Array.isArray(cur.activeSession.games)?cur.activeSession.games:Object.values(cur.activeSession.games||{});
+        fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+          if(!cur||cur.id!==sessId)return;
+          const g=Array.isArray(cur.games)?cur.games:Object.values(cur.games||{});
           if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return;
-          g.splice(gameIdx,1);
-          return{...cur,activeSession:{...cur.activeSession,games:g}};
+          g.splice(gameIdx,1);return{...cur,games:g};
         },(err,committed,snap)=>{
           hideLoading();
           if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(!committed)toast('⚠ 対局が変更されました。再度お試しください');return;}
-          if(snap&&snap.val())mergeRemote(snap.val());
+          if(A.activeSession&&snap&&snap.val())A.activeSession=snap.val();
           renderSession();toast('削除しました');
         });
       } else {
@@ -2339,8 +2341,21 @@ function addMemberToSession(pid){
   if(!A.activeSession||A.activeSession.players.includes(pid))return;
   A.activeSession.players.push(pid);
   A.activeSession.chips=A.activeSession.chips||{};
-  saveApp();closeModal('m-add-member');renderSession();
-  toast(playerById(pid).name+'を追加しました');
+  const sessId=A.activeSession.id;
+  closeModal('m-add-member');renderSession();
+  if(fbDb&&fbReady){
+    _skipRemoteCount++;
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      const existing=Array.isArray(cur.players)?cur.players:Object.values(cur.players||{});
+      if(existing.includes(pid))return{...cur};
+      return{...cur,players:[...existing,pid]};
+    },(err,committed,snap)=>{
+      if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;return;}
+      if(A.activeSession&&A.activeSession.id===sessId&&snap&&snap.val())A.activeSession=snap.val();
+      toast(playerById(pid).name+'を追加しました');
+    });
+  } else {saveApp();toast(playerById(pid).name+'を追加しました');}
 }
 // ══ 一括セッション登録 ══
 let _bulkData=null;
