@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260425-1146';
+const APP_VERSION = 'v14-20260425-1157';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -2249,8 +2249,6 @@ async function shareStatsTable(){
 }
 function adminDeleteSession(id){
   openConfirm('セッションを削除','このセッションを削除しますか？',()=>{
-    A.completedSessions=A.completedSessions.filter(x=>x.id!==id);
-    closeModal('m-confirm');closeModal('m-sess-detail');renderSession();
     if(fbDb&&fbReady){
       showLoading('セッションを削除中...');
       _skipRemoteCount++;
@@ -2262,10 +2260,14 @@ function adminDeleteSession(id){
       },(err,committed,snap)=>{
         hideLoading();
         if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
-        if(committed&&snap&&snap.val())mergeRemote(snap.val());
-        toast('削除しました');
+        if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除できませんでした');return;}
+        if(snap&&snap.val())mergeRemote(snap.val());
+        closeModal('m-confirm');closeModal('m-sess-detail');renderSession();toast('削除しました');
       });
-    } else {saveApp();toast('削除しました');}
+    } else {
+      A.completedSessions=A.completedSessions.filter(x=>x.id!==id);
+      saveApp();closeModal('m-confirm');closeModal('m-sess-detail');renderSession();toast('削除しました');
+    }
   },'削除');
 }
 function resumeSession(id){
@@ -2400,16 +2402,27 @@ function saveEditGame(){
     const sorted=[...vals].sort((a,b)=>b.pts-a.pts);
     newGameData=[game[0],sorted.map((v,i)=>[v.pid,v.pts,i+1,v.pts<=-60?1:0])];
   }
-  // ローカル更新
-  sess.games[editingGameIdx]=newGameData;
-  closeModal('m-edit-game');if(isActiveSess)renderSession();else openSessDetail(editingSessId);
-  // タイムスタンプ検証付き Atomic 更新
   if(fbDb&&fbReady){
+    // Firebase: pre-mutation なし。Atomic 成功後に mergeRemote/snap 反映→描画
+    setModalLoading('m-edit-game',true,'保存中...');
     updateGameAtomic(editingSessId,editingGameIdx,expectedTs,newGameData,
-      ()=>toast('対局を更新しました'),
-      (reason)=>toast(reason==='timestamp_mismatch'?'⚠ 対局が変更されました。再読み込みしてください':'保存エラー')
+      ()=>{
+        setModalLoading('m-edit-game',false);
+        closeModal('m-edit-game');
+        if(isActiveSess)renderSession();else openSessDetail(editingSessId);
+        toast('対局を更新しました');
+      },
+      (reason)=>{
+        setModalLoading('m-edit-game',false);
+        toast(reason==='timestamp_mismatch'?'⚠ 対局が変更されました。再読み込みしてください':'保存エラー');
+      }
     );
-  } else {saveApp();toast('対局を更新しました');}
+  } else {
+    // offline: ローカルを直接書き換えて localStorage 保存
+    sess.games[editingGameIdx]=newGameData;
+    closeModal('m-edit-game');if(isActiveSess)renderSession();else openSessDetail(editingSessId);
+    saveApp();toast('対局を更新しました');
+  }
 }
 function deleteGame(sessId,gameIdx){
   const isActiveSess=A.activeSession&&A.activeSession.id===sessId;if(!isActiveSess&&!isAdmin())return;
@@ -2417,17 +2430,23 @@ function deleteGame(sessId,gameIdx){
     const src=isActiveSess?A.activeSession:A.completedSessions.find(x=>x.id===sessId);
     const gameTs=(src&&src.games&&src.games[gameIdx])?src.games[gameIdx][0]:null;
     if(!gameTs){toast('対局が見つかりません');return;}
-    // ローカル更新
-    if(isActiveSess){if(A.activeSession)A.activeSession.games.splice(gameIdx,1);closeModal('m-confirm');renderSession();}
-    else{const s=A.completedSessions.find(x=>x.id===sessId);if(s)s.games.splice(gameIdx,1);closeModal('m-confirm');openSessDetail(sessId);}
-    // Atomic 削除（タイムスタンプ検証付き）
     if(fbDb&&fbReady){
+      // Firebase: pre-mutation なし。Atomic 成功後に snap 反映→描画
       showLoading('対局を削除中...');
       deleteGameAtomic(sessId,gameIdx,gameTs,isActiveSess,
-        ()=>{hideLoading();if(isActiveSess)renderSession();else openSessDetail(sessId);toast('削除しました');},
+        ()=>{
+          hideLoading();closeModal('m-confirm');
+          if(isActiveSess)renderSession();else openSessDetail(sessId);
+          toast('削除しました');
+        },
         (reason)=>{hideLoading();toast(reason==='timestamp_mismatch'?'⚠ 対局が変更されました。再読み込みしてください':'削除エラー');}
       );
-    } else {saveApp();toast('削除しました');}
+    } else {
+      // offline: ローカルを直接削除して localStorage 保存
+      if(isActiveSess){if(A.activeSession)A.activeSession.games.splice(gameIdx,1);closeModal('m-confirm');renderSession();}
+      else{const s=A.completedSessions.find(x=>x.id===sessId);if(s)s.games.splice(gameIdx,1);closeModal('m-confirm');openSessDetail(sessId);}
+      saveApp();toast('削除しました');
+    }
   },'削除');
 }
 function moveGame(sessId,idx,dir){
@@ -2473,16 +2492,20 @@ function openAddMember(){
 function addMemberToSession(pid){
   if(!A.activeSession||A.activeSession.players.includes(pid))return;
   const sessId=A.activeSession.id;
-  A.activeSession.players.push(pid);
-  A.activeSession.chips=A.activeSession.chips||{};
-  closeModal('m-add-member');renderSession();
+  const pname=playerById(pid).name;
   if(fbDb&&fbReady){
+    // Firebase: pre-mutation なし。Atomic 成功後に snap 反映→描画
     updateActiveSessionAtomic(sessId,cur=>{
       const existing=Array.isArray(cur.players)?cur.players:Object.values(cur.players||{});
       if(existing.includes(pid))return{...cur};
       return{...cur,players:[...existing,pid]};
-    },()=>toast(playerById(pid).name+'を追加しました'));
-  } else {saveApp();toast(playerById(pid).name+'を追加しました');}
+    },()=>{closeModal('m-add-member');renderSession();toast(pname+'を追加しました');});
+  } else {
+    // offline: ローカルを直接変更して localStorage 保存
+    A.activeSession.players.push(pid);
+    A.activeSession.chips=A.activeSession.chips||{};
+    saveApp();closeModal('m-add-member');renderSession();toast(pname+'を追加しました');
+  }
 }
 // ══ 一括セッション登録 ══
 let _bulkData=null;
@@ -2575,7 +2598,6 @@ function confirmBulkImport(){
     newPlayersToAdd.push({id:newId,name,color});
     nameToId[name]=newId;
   }
-  A.newPlayers.push(...newPlayersToAdd);
   // 対局データ構築
   const games=_bulkData.games.map(g=>{
     const sorted=[...g].sort((a,b)=>b.pts-a.pts);
@@ -2588,14 +2610,64 @@ function confirmBulkImport(){
   const playerSet=new Set();
   for(const g of games){for(const[pid] of g[1])playerSet.add(pid);}
   const session={id:Date.now().toString(),start:startDt,end:endDt,players:[...playerSet],games,chips,note};
-  A.completedSessions.push(session);
-  saveApp();closeModal('m-bulk-import');
-  renderSession();updateHdrBadge();
-  toast(`登録完了（${games.length}局・${newPlayersToAdd.length>0?newPlayersToAdd.length+'名追加':''}）`);
-  _bulkData=null;
+  const doneMsg=`登録完了（${games.length}局・${newPlayersToAdd.length>0?newPlayersToAdd.length+'名追加':''}）`;
+  if(fbDb&&fbReady){
+    // Firebase: newPlayers + completedSessions を1つの transaction で保存
+    const snapPlayers=[...A.newPlayers,...newPlayersToAdd].map(p=>({...p}));
+    showLoading('登録中...');
+    _skipRemoteCount++;
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return;
+      const localPids=new Set(snapPlayers.map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
+      const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
+      const serverOnlyP=srvP.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
+      const mergedPlayers=[...snapPlayers,...serverOnlyP];
+      const srvSessions=Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});
+      return{...cur,newPlayers:mergedPlayers,completedSessions:[...srvSessions,session]};
+    },(err,committed,snap)=>{
+      hideLoading();
+      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('登録エラー: '+err.message);return;}
+      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('登録できませんでした。再度お試しください。');return;}
+      if(snap&&snap.val())mergeRemote(snap.val());
+      closeModal('m-bulk-import');renderSession();updateHdrBadge();toast(doneMsg);_bulkData=null;
+    });
+  } else {
+    // offline: ローカルに直接追加して localStorage 保存
+    A.newPlayers.push(...newPlayersToAdd);
+    A.completedSessions.push(session);
+    saveApp();closeModal('m-bulk-import');
+    renderSession();updateHdrBadge();toast(doneMsg);_bulkData=null;
+  }
 }
 function openEditSessMeta(id){if(!isAdmin())return;const s=A.completedSessions.find(x=>x.id===id);if(!s)return;editingSessId=id;document.getElementById('edit-sess-start').value=s.start||'';document.getElementById('edit-sess-end').value=s.end||'';document.getElementById('edit-sess-note').value=s.note||'';document.getElementById('m-edit-sess-meta').classList.add('on');}
-function saveEditSessMeta(){const sess=A.completedSessions.find(x=>x.id===editingSessId);if(!sess)return;const start=document.getElementById('edit-sess-start').value;if(!start){toast('開始日時を入力してください');return;}sess.start=start;sess.end=document.getElementById('edit-sess-end').value||'';sess.note=document.getElementById('edit-sess-note').value;saveApp();closeModal('m-edit-sess-meta');openSessDetail(editingSessId);toast('更新しました');}
+function saveEditSessMeta(){
+  const start=document.getElementById('edit-sess-start').value;
+  if(!start){toast('開始日時を入力してください');return;}
+  const end=document.getElementById('edit-sess-end').value||'';
+  const note=document.getElementById('edit-sess-note').value;
+  const sessId=editingSessId;
+  if(fbDb&&fbReady){
+    // Firebase: Atomic transaction で completedSessions を更新
+    _skipRemoteCount++;
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return;
+      const sessions=Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});
+      const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
+      sessions[si]={...sessions[si],start,end,note};
+      return{...cur,completedSessions:sessions};
+    },(err,committed,snap)=>{
+      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('保存エラー: '+err.message);return;}
+      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('更新できませんでした');return;}
+      if(snap&&snap.val())mergeRemote(snap.val());
+      closeModal('m-edit-sess-meta');openSessDetail(sessId);toast('更新しました');
+    });
+  } else {
+    // offline: ローカルを直接書き換えて localStorage 保存
+    const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess)return;
+    sess.start=start;sess.end=end;sess.note=note;
+    saveApp();closeModal('m-edit-sess-meta');openSessDetail(sessId);toast('更新しました');
+  }
+}
 
 // ══ EXCEL BACKUP (全対局データ) ══
 function dlBackup(){
@@ -2667,9 +2739,25 @@ function importBackup(input){
           const players=String(row[3]||'').split(',').map(s=>parseInt(s.trim())).filter(n=>Number.isInteger(n)&&!isNaN(n));
           return{id:sid,start:String(row[1]||''),end:String(row[2]||''),players,games:gamesBySess[sid]||[],chips,note:String(row[5]||'')};
         });
-        A.newPlayers=newPlayers;A.completedSessions=completedSessions;A.activeSession=null;
-        saveApp();closeModal('m-confirm');refreshCurrentTab();updateHdrBadge();
-        toast(`復元完了（${sRows.length}セッション・${gRows.length}局）`);
+        if(fbDb&&fbReady){
+          showLoading('復元中...');
+          _skipRemoteCount++;
+          fbDb.ref(FB_PATH).transaction(cur=>{
+            const base=cur||{};
+            return{...base,newPlayers,completedSessions,activeSession:null};
+          },(err,committed,snap)=>{
+            hideLoading();
+            if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('復元エラー: '+err.message);return;}
+            if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('復元できませんでした');return;}
+            if(snap&&snap.val())mergeRemote(snap.val());
+            closeModal('m-confirm');refreshCurrentTab();updateHdrBadge();
+            toast(`復元完了（${sRows.length}セッション・${gRows.length}局）`);
+          });
+        } else {
+          A.newPlayers=newPlayers;A.completedSessions=completedSessions;A.activeSession=null;
+          saveApp();closeModal('m-confirm');refreshCurrentTab();updateHdrBadge();
+          toast(`復元完了（${sRows.length}セッション・${gRows.length}局）`);
+        }
       },'復元');
     }catch(err){toast('ファイルエラー: '+err.message);}
   };
