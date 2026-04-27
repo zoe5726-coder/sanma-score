@@ -469,8 +469,12 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260427-0914';
+const APP_VERSION = 'v14-20260427-1336';
 const FB_PATH = 'sanma/v2';
+const FB_STATE   = FB_PATH + '/state';
+const FB_ACTIVE  = FB_PATH + '/activeSession';
+const FB_COMPLETED = FB_PATH + '/completedSessionsById';
+const FB_IDX     = FB_PATH + '/completedSessionIndex';
 
 // ══ HISTORICAL DATA (空) ══
 const HIST={"players":[],"games":[],"sessions":[]};
@@ -640,6 +644,18 @@ function _fbArr(v,fallback){
   if(v&&typeof v==='object')return Object.keys(v).sort((a,b)=>Number(a)-Number(b)).map(k=>v[k]);
   return fallback||[];
 }
+// ── normalizeSession(): Firebase スナップ→ローカル形式の安全変換（トップレベル関数）──
+function normalizeSession(s){
+  if(!s||typeof s!=='object')return null;
+  const games=_fbArr(s.games,[]).map(g=>{
+    if(!g)return g;
+    const gArr=Array.isArray(g)?g:_fbArr(g,[]);
+    const ts=gArr[0]||'';
+    const pd=_fbArr(gArr[1],null);
+    return[ts,pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+  });
+  return{...s,games,players:_fbArr(s.players,[]),chips:s.chips||{}};
+}
 function mergeRemote(data){
   if(!data||typeof data!=='object')return;
   // Firebaseはnullフィールドをimplicit削除するため、キーなし＝null
@@ -663,20 +679,17 @@ function mergeRemote(data){
     });
     safeActiveSession={...safeActiveSession,players,games,chips:safeActiveSession.chips||{}};
   }
-  // 型バリデーション（壊れたデータがFirebaseから来ても安全に扱う）
-  const normalizeSession=s=>{
-    if(!s||typeof s!=='object')return null;
-    const games=_fbArr(s.games,[]).map(g=>{
-      if(!g)return g;
-      const gArr=Array.isArray(g)?g:_fbArr(g,[]);
-      const ts=gArr[0]||'';
-      const pd=_fbArr(gArr[1],null);
-      return[ts,pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
-    });
-    return{...s,games,players:_fbArr(s.players,[]),chips:s.chips||{}};
-  };
-  const rawSessions=_fbArr(data.completedSessions,null);
-  const safeSessions=rawSessions?rawSessions.map(normalizeSession).filter(s=>s&&s.id&&s.start):A.completedSessions;
+  // completedSessions の統合（新形式: completedSessionsById、旧形式: completedSessions配列）
+  let safeSessions;
+  if(data.completedSessionsById&&typeof data.completedSessionsById==='object'){
+    // 新形式: {sessId: sessionData, ...}
+    safeSessions=Object.values(data.completedSessionsById)
+      .map(normalizeSession).filter(s=>s&&s.id&&s.start);
+  } else {
+    // 旧形式: 配列（後方互換）
+    const rawSessions=_fbArr(data.completedSessions,null);
+    safeSessions=rawSessions?rawSessions.map(normalizeSession).filter(s=>s&&s.id&&s.start):A.completedSessions;
+  }
   const safePlayers=Array.isArray(data.newPlayers)?data.newPlayers.filter(p=>p&&typeof p==='object'&&p.id!=null&&p.name):A.newPlayers;
   const safeFavs=Array.isArray(data.favorites)?data.favorites:A.favorites;
   const safeSettings=data.settings&&typeof data.settings==='object'?{...A.settings,...data.settings}:A.settings;
@@ -707,6 +720,22 @@ function loadApp(){
     if(!_initialLoadDone){
       _initialLoadDone=true;fbReady=true;
       if(data)mergeRemote(data);
+      // ── 旧形式マイグレーション: completedSessions配列 → completedSessionsById ──
+      if(data&&data.completedSessions&&!data.completedSessionsById){
+        const sessions=_fbArr(data.completedSessions,[]);
+        if(sessions.length>0){
+          _skipRemoteCount++;
+          const mig={};
+          mig['completedSessions']=null; // 旧配列を削除
+          sessions.forEach(s=>{
+            if(!s||!s.id)return;
+            mig['completedSessionsById/'+s.id]=s;
+            mig['completedSessionIndex/'+s.id]={id:s.id,start:s.start||'',end:s.end||'',playerCount:(s.players||[]).length,gameCount:(_fbArr(s.games,[])).length};
+          });
+          if(!data.state){mig['state']={activeSessionId:data.activeSession?.id||null,version:1,updatedAt:Date.now()};}
+          fbDb.ref(FB_PATH).update(mig);
+        }
+      }
       syncSettingsUI();updateHdrBadge();setSyncStatus('synced','同期済み');go(currentTab||'home');
     } else {
       if(_skipRemoteCount>0){_skipRemoteCount--;setSyncStatus('synced','同期済み');return;}
@@ -749,19 +778,8 @@ function saveApp(){
     const snapFavs=[...(A.favorites||[])];
     const snapPlayers=(A.newPlayers||[]).map(p=>({...p}));
     _skipRemoteCount++;setSyncStatus('syncing','保存中...');
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur){
-        // 初回: 全データを書き込む（activeSession・completedSessions も含む）
-        return{settings:snapSettings,favorites:snapFavs,newPlayers:snapPlayers,
-          activeSession:A.activeSession||null,completedSessions:A.completedSessions||[]};
-      }
-      // 通常: settings・favorites・newPlayers のみ更新。activeSession・completedSessions は触らない。
-      const localPids=new Set(snapPlayers.map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
-      const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
-      const serverOnlyP=srvP.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
-      const mergedPlayers=[...snapPlayers,...serverOnlyP];
-      return{...cur,settings:snapSettings,favorites:snapFavs,newPlayers:mergedPlayers};
-    },(err,committed,snap)=>{
+    // update() は指定パスのみ書き込む。root全体を読まないため completedSessionsById の量に左右されない。
+    fbDb.ref(FB_PATH).update({settings:snapSettings,favorites:snapFavs,newPlayers:snapPlayers},err=>{
       if(err){
         if(_skipRemoteCount>0)_skipRemoteCount--;
         setSyncStatus('offline','保存エラー: '+(err.code||err.message||''));
@@ -769,9 +787,7 @@ function saveApp(){
         else{saveApp._fc=0;toast('⚠ 保存に繰り返し失敗しました。ページを再読み込みしてください。');}
         return;
       }
-      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;}
       saveApp._fc=0;
-      if(committed&&snap&&snap.val())mergeRemote(snap.val());
       setSyncStatus('synced','同期済み');
     });
   } else {try{localStorage.setItem('sanma-v2',JSON.stringify(A));}catch(e){toast('⚠ ローカル保存エラー');}}
@@ -806,24 +822,24 @@ function _normalizeActiveSession(sv){
   return{...sv,players,games,chips:sv.chips||{}};
 }
 
-// ── startSessionAtomic(): セッション開始（root transaction）──
-// activeSession が既に存在する場合はアボート
+// ── startSessionAtomic(): セッション開始（/activeSession child transaction）──
+// root全体を読まず /activeSession パスだけにtransaction → completedSessionsByIdの量に非依存
 function startSessionAtomic(newSess,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
-  _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur)return{settings:A.settings,favorites:A.favorites,newPlayers:A.newPlayers,
-      completedSessions:[],activeSession:newSess};
-    if(cur.activeSession!==null&&cur.activeSession!==undefined)return; // 既に開始済み → アボート
-    return{...cur,activeSession:newSess};
-  },(err,committed,snap)=>{
+  _skipRemoteCount++; // /activeSession transaction で1イベント
+  fbDb.ref(FB_ACTIVE).transaction(cur=>{
+    if(cur!==null&&cur!==undefined)return; // 既に開始済み → アボート
+    return newSess;
+  },(err,committed)=>{
     if(err||!committed){
       if(_skipRemoteCount>0)_skipRemoteCount--;
       if(onAbort)onAbort(committed===false?'already_exists':'error');
       return;
     }
+    // /activeSession への書き込み成功。stateノードを更新（best-effort, 1イベント）
+    _skipRemoteCount++;
+    fbDb.ref(FB_STATE).update({activeSessionId:newSess.id,updatedAt:Date.now()});
     A.activeSession=newSess;
-    if(snap&&snap.val())mergeRemote(snap.val());
     if(onSuccess)onSuccess();
   });
 }
@@ -886,18 +902,19 @@ function updateGameAtomic(sessId,gameIdx,expectedTs,newGameData,onSuccess,onAbor
       if(onSuccess)onSuccess();
     });
   } else {
-    // completed: root transaction（completedSessions 内を更新）
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return;
-      const sessions=[..._fbSessions(cur)];
-      const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
-      const g=[..._fbGames(sessions[si])];
+    // completed: completedSessionsById/{sessId} transaction（当該セッションのみ読み書き）
+    fbDb.ref(FB_COMPLETED+'/'+sessId).transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      const g=[..._fbGames(cur)];
       if(!g[gameIdx]||g[gameIdx][0]!==expectedTs)return;
-      g[gameIdx]=newGameData;sessions[si]={...sessions[si],games:g};
-      return{...cur,completedSessions:sessions};
+      g[gameIdx]=newGameData;
+      return{...cur,games:g};
     },(err,committed,snap)=>{
       if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
-      if(snap&&snap.val())mergeRemote(snap.val());
+      if(snap&&snap.val()){
+        const updated=normalizeSession(snap.val());
+        if(updated){const idx=A.completedSessions.findIndex(s=>s&&s.id===sessId);if(idx!==-1){A.completedSessions[idx]=updated;invalidateStatsCache();}}
+      }
       if(onSuccess)onSuccess();
     });
   }
@@ -930,57 +947,82 @@ function deleteGameAtomic(sessId,gameIdx,gameTs,isActive,onSuccess,onAbort){
       if(onSuccess)onSuccess();
     });
   } else {
-    // completed: root transaction
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return;
-      const sessions=[..._fbSessions(cur)];
-      const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
-      const g=[..._fbGames(sessions[si])];
-      if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return;
-      g.splice(gameIdx,1);sessions[si]={...sessions[si],games:g};
-      return{...cur,completedSessions:sessions};
+    // completed: completedSessionsById/{sessId} transaction（当該セッションのみ読み書き）
+    fbDb.ref(FB_COMPLETED+'/'+sessId).transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      const raw=cur.games;
+      if(Array.isArray(raw)){
+        if(!raw[gameIdx]||raw[gameIdx][0]!==gameTs)return;
+        const newG=[...raw];newG.splice(gameIdx,1);return{...cur,games:newG};
+      } else {
+        const keys=Object.keys(raw||{}).sort((a,b)=>{const na=Number(a),nb=Number(b);return(isNaN(na)||isNaN(nb))?(a<b?-1:a>b?1:0):na-nb;});
+        const targetKey=keys[gameIdx];if(!targetKey)return;
+        const entry=Array.isArray(raw[targetKey])?raw[targetKey]:_fbArr(raw[targetKey],[]);
+        if(!entry||entry[0]!==gameTs)return;
+        const newGObj={...raw};delete newGObj[targetKey];return{...cur,games:newGObj};
+      }
     },(err,committed,snap)=>{
       if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
-      if(snap&&snap.val())mergeRemote(snap.val());
+      if(snap&&snap.val()){
+        const updated=normalizeSession(snap.val());
+        if(updated){const idx=A.completedSessions.findIndex(s=>s&&s.id===sessId);if(idx!==-1){A.completedSessions[idx]=updated;invalidateStatsCache();}}
+      }
       if(onSuccess)onSuccess();
     });
   }
 }
 
-// ── endSessionAtomic(): セッション終了（root transaction）──
-// activeSession=null + completedSessions への追記 を単一 transaction で実行
-// games はサーバー側の値を正規化して使う（楽観更新で追加された対局も含まれる）
+// ── endSessionAtomic(): セッション終了（/activeSession child transaction + multi-path update）──
+// ① /activeSession にtransactionをかけ、サーバーのgamesをキャプチャしつつnullにクリア
+// ② completedSessionsById/{id} + completedSessionIndex/{id} + state を update() で書き込み
+// root全体のtransactionが不要 → completedSessionsByIdの量に非依存
 function endSessionAtomic(sessId,sessData,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
-  _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur||!cur.activeSession||cur.activeSession.id!==sessId)return; // 既に終了済み → アボート
-    // サーバーの games を正規化（object 形式・配列形式両対応）
-    const svGames=_fbGames(cur.activeSession).map(g=>{
-      if(!g)return g;
-      const ga=Array.isArray(g)?g:_fbArr(g,[]);
-      const pd=_fbArr(ga[1],null);
-      return[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
-    });
-    const svPlayers=_fbArr(cur.activeSession.players,sessData.players||[]);
-    // sessData の chips/end/note を使い、games/players はサーバー値を優先
-    const sessToSave={...sessData,games:svGames,players:svPlayers};
-    const completed=[..._fbSessions(cur)];
-    return{...cur,activeSession:null,completedSessions:[...completed,sessToSave]};
-  },(err,committed,snap)=>{
+  let serverActiveData=null; // transactionで取得するサーバー側の確定games
+  _skipRemoteCount++; // /activeSession transaction: 1イベント
+  fbDb.ref(FB_ACTIVE).transaction(cur=>{
+    if(!cur||cur.id!==sessId)return; // セッション不一致（既に終了済み等）→ アボート
+    serverActiveData=cur; // サーバー側の最新データをキャプチャ（transaction再試行時は上書き）
+    return null; // activeSession をクリア
+  },(err,committed)=>{
     if(err){
       if(_skipRemoteCount>0)_skipRemoteCount--;
       if(onAbort)onAbort('error',err.message);return;
     }
     if(!committed){
       if(_skipRemoteCount>0)_skipRemoteCount--;
-      if(snap&&snap.val())mergeRemote(snap.val());
-      A.activeSession=null;
       if(onAbort)onAbort('already_ended');return;
     }
-    A.activeSession=null;
-    if(snap&&snap.val())mergeRemote(snap.val());
-    if(onSuccess)onSuccess();
+    // activeSession クリア完了。サーバーの確定games を正規化
+    const svGames=_fbGames(serverActiveData).map(g=>{
+      if(!g)return g;
+      const ga=Array.isArray(g)?g:_fbArr(g,[]);
+      const pd=_fbArr(ga[1],null);
+      return[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+    });
+    const svPlayers=_fbArr(serverActiveData.players,sessData.players||[]);
+    const sessToSave={...sessData,games:svGames,players:svPlayers};
+    const indexEntry={id:sessId,start:sessToSave.start||'',end:sessToSave.end||'',
+      playerCount:svPlayers.length,gameCount:svGames.length};
+    // completedSessionsById + index + state を一括 update()（1イベント）
+    _skipRemoteCount++;
+    const updates={};
+    updates['completedSessionsById/'+sessId]=sessToSave;
+    updates['completedSessionIndex/'+sessId]=indexEntry;
+    updates['state/activeSessionId']=null;
+    updates['state/updatedAt']=Date.now();
+    fbDb.ref(FB_PATH).update(updates,updateErr=>{
+      if(updateErr){
+        if(_skipRemoteCount>0)_skipRemoteCount--;
+        // activeSessionはすでにクリア済み → completedSessionsById書き込みをリトライ
+        if(onAbort)onAbort('error',updateErr.message);return;
+      }
+      A.activeSession=null;
+      // ローカル completedSessions にも追加（重複除去込み）
+      A.completedSessions=[sessToSave,...A.completedSessions.filter(s=>s&&s.id!==sessId)];
+      invalidateStatsCache();
+      if(onSuccess)onSuccess();
+    });
   });
 }
 
@@ -1009,21 +1051,26 @@ function updateActiveSessionAtomic(sessId,applyFn,onSuccess){
 }
 
 // ── updateCompletedSessionAtomic(): 完了済みセッション内の汎用更新 ──
+// completedSessionsById/{sessId} にtransactionをかけ、当該セッションのみ読み書き
 function updateCompletedSessionAtomic(sessId,applyFn,onSuccess){
   if(!fbDb||!fbReady)return;
   _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur)return;
-    const sessions=[..._fbSessions(cur)];
-    const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
-    const updated=applyFn({...sessions[si]});
-    if(!updated)return;
-    sessions[si]=updated;
-    return{...cur,completedSessions:sessions};
+  fbDb.ref(FB_COMPLETED+'/'+sessId).transaction(cur=>{
+    if(!cur||cur.id!==sessId)return;
+    const updated=applyFn({...cur});
+    return updated||cur; // applyFnがnullを返した場合は変更なし
   },(err,committed,snap)=>{
     if(err){if(_skipRemoteCount>0)_skipRemoteCount--;return;}
-    if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;}
-    if(committed&&snap&&snap.val())mergeRemote(snap.val());
+    if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;return;}
+    // ローカル completedSessions を更新
+    if(snap&&snap.val()){
+      const updated=normalizeSession(snap.val());
+      if(updated){
+        const idx=A.completedSessions.findIndex(s=>s&&s.id===sessId);
+        if(idx!==-1)A.completedSessions[idx]=updated;
+        invalidateStatsCache();
+      }
+    }
     if(onSuccess)onSuccess();
   });
 }
@@ -1627,24 +1674,11 @@ function toggleChipSign(id,pid){
 function updateCompletedChip(sessId,pid,value){
   const sess=A.completedSessions.find(x=>x.id===sessId);if(!sess||!isAdmin())return;
   sess.chips=sess.chips||{};sess.chips[String(pid)]=parseInt(value)||0;
-  // 完了済みセッションのチップ更新: transactionで当該セッションのチipsだけをマージ書き込み（他管理者の変更を消さない）
+  // 完了済みセッションのチップ更新: completedSessionsById/{id}/chips/{pid} のみ set（他セッションに無影響）
   if(fbDb&&fbReady){
-    _skipRemoteCount++;
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return;
-      const rawSrv=cur.completedSessions;
-      const srvSessions=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
-      const updated=srvSessions.map(s=>{
-        if(!s||s.id!==sessId)return s;
-        // サーバーの同セッションのチップにローカル変更だけを上書き
-        return{...s,chips:{...(s.chips||{}),[String(pid)]:parseInt(value)||0}};
-      });
-      return{...cur,completedSessions:updated};
-    },(err,committed,snap)=>{
-      if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('保存エラー: '+err.message);return;}
-      if(committed&&snap&&snap.val())mergeRemote(snap.val());
-      setSyncStatus('synced','同期済み');
-    });
+    // chips フィールドのみを update() で書き込む（root transactionと完全独立）
+    fbDb.ref(FB_COMPLETED+'/'+sessId+'/chips/'+String(pid)).set(parseInt(value)||0)
+      .catch(err=>toast('チップ保存エラー: '+err.message));
   } else {saveApp();}
   const ptTot=sess.games.reduce((acc,g)=>{const gp=Array.isArray(g[1])?g[1].find(x=>x[0]===pid):null;return acc+(gp?gp[1]:0);},0);
   const tot=ptTot+(parseInt(value)||0);
@@ -2358,17 +2392,16 @@ function adminDeleteSession(id){
   openConfirm('セッションを削除','このセッションを削除しますか？',()=>{
     if(fbDb&&fbReady){
       showLoading('セッションを削除中...');
-      _skipRemoteCount++;
-      fbDb.ref(FB_PATH).transaction(cur=>{
-        if(!cur)return;
-        const rawSrv=cur.completedSessions;
-        const srvArr=Array.isArray(rawSrv)?rawSrv:Object.values(rawSrv||{});
-        return{...cur,completedSessions:srvArr.filter(s=>s&&s.id!==id)};
-      },(err,committed,snap)=>{
+      _skipRemoteCount++; // update(): 1イベント
+      const updates={};
+      updates['completedSessionsById/'+id]=null;
+      updates['completedSessionIndex/'+id]=null;
+      fbDb.ref(FB_PATH).update(updates,err=>{
         hideLoading();
         if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
-        if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除できませんでした');return;}
-        if(snap&&snap.val())mergeRemote(snap.val());
+        // ローカル状態を更新
+        A.completedSessions=A.completedSessions.filter(s=>s&&s.id!==id);
+        invalidateStatsCache();
         closeModal('m-confirm');closeModal('m-sess-detail');renderSession();toast('削除しました');
       });
     } else {
@@ -2380,25 +2413,20 @@ function adminDeleteSession(id){
 function resumeSession(id){
   if(fbDb && fbReady){
     showLoading('セッションを再開中...');
-    _skipRemoteCount++;
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur) return;
-      if(cur.activeSession){ return; } // 進行中セッションあり → アボート
-      const raw = cur.completedSessions;
-      const sessions = Array.isArray(raw) ? raw : Object.values(raw || {});
-      const idx = sessions.findIndex(s => s && s.id === id);
-      if(idx === -1) return; // 対象なし → アボート
-      const sess = {...sessions[idx]};
-      delete sess.end;
-      const updatedCompleted = sessions.filter(s => s && s.id !== id);
-      return { ...cur, activeSession: sess, completedSessions: updatedCompleted };
-    }, (err, committed, snap)=>{
-      hideLoading();
-      if(err){ if(_skipRemoteCount>0)_skipRemoteCount--; toast('再開エラー: '+err.message); return; }
-      if(!committed){ if(_skipRemoteCount>0)_skipRemoteCount--; toast('再開できませんでした。既に進行中のセッションがあるか、対象が見つかりません。'); return; }
-      if(snap && snap.val()){ mergeRemote(snap.val()); }
-      if(document.getElementById('m-sess-detail').classList.contains('on')){ closeModal('m-sess-detail'); }
-      updateHdrBadge(); renderSession(); go('session'); toast('セッションを再開しました');
+    // ① completedSessionsById/{id} を一度読んでセッションデータを取得
+    fbDb.ref(FB_COMPLETED+'/'+id).once('value',sessSnap=>{
+      const sessRaw=sessSnap.val();
+      if(!sessRaw||sessRaw.id!==id){
+        hideLoading();
+        // 旧形式（completedSessions配列）のフォールバック: ローカルデータを使用
+        const localSess=A.completedSessions.find(s=>s&&s.id===id);
+        if(!localSess){toast('セッションが見つかりません');return;}
+        _resumeSessionWithData(id,localSess);
+        return;
+      }
+      _resumeSessionWithData(id,sessRaw);
+    },err=>{
+      hideLoading();toast('読み込みエラー: '+err.message);
     });
   } else {
     // Firebase なしのローカル処理のみ
@@ -2412,6 +2440,34 @@ function resumeSession(id){
     saveApp();
     updateHdrBadge(); renderSession(); go('session'); toast('セッションを再開しました');
   }
+}
+// resumeSession の実処理: セッションデータ取得後に /activeSession transaction でアトミックに開始
+function _resumeSessionWithData(id,sessRaw){
+  const revivedSess={...sessRaw};
+  delete revivedSess.end; // 再開時は end を削除
+  _skipRemoteCount++; // /activeSession transaction: 1イベント
+  fbDb.ref(FB_ACTIVE).transaction(cur=>{
+    if(cur!==null&&cur!==undefined)return; // 進行中セッションあり → アボート
+    return revivedSess;
+  },(err,committed)=>{
+    hideLoading();
+    if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('再開エラー: '+err.message);return;}
+    if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('再開できませんでした。既に進行中のセッションがあります。');return;}
+    // activeSession 設定完了。completedSessionsById/{id} + index + state を削除
+    _skipRemoteCount++; // update(): 1イベント
+    const updates={};
+    updates['completedSessionsById/'+id]=null;
+    updates['completedSessionIndex/'+id]=null;
+    updates['state/activeSessionId']=id;
+    updates['state/updatedAt']=Date.now();
+    fbDb.ref(FB_PATH).update(updates);
+    // ローカル状態を更新
+    A.activeSession=_normalizeActiveSession(revivedSess);
+    A.completedSessions=A.completedSessions.filter(s=>s&&s.id!==id);
+    invalidateStatsCache();
+    if(document.getElementById('m-sess-detail')?.classList.contains('on'))closeModal('m-sess-detail');
+    updateHdrBadge();renderSession();go('session');toast('セッションを再開しました');
+  });
 }
 
 // ══ EDIT GAME ══
@@ -2719,23 +2775,22 @@ function confirmBulkImport(){
   const session={id:Date.now().toString(),start:startDt,end:endDt,players:[...playerSet],games,chips,note};
   const doneMsg=`登録完了（${games.length}局・${newPlayersToAdd.length>0?newPlayersToAdd.length+'名追加':''}）`;
   if(fbDb&&fbReady){
-    // Firebase: newPlayers + completedSessions を1つの transaction で保存
-    const snapPlayers=[...A.newPlayers,...newPlayersToAdd].map(p=>({...p}));
+    // Firebase: update() で completedSessionsById + index + newPlayers を書き込み
+    // root全体のtransactionを避け、高速なマルチパスupdateを使用
     showLoading('登録中...');
-    _skipRemoteCount++;
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return;
-      const localPids=new Set(snapPlayers.map(p=>p&&p.id!=null?String(p.id):null).filter(Boolean));
-      const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
-      const serverOnlyP=srvP.filter(p=>p&&p.id!=null&&!localPids.has(String(p.id)));
-      const mergedPlayers=[...snapPlayers,...serverOnlyP];
-      const srvSessions=Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});
-      return{...cur,newPlayers:mergedPlayers,completedSessions:[...srvSessions,session]};
-    },(err,committed,snap)=>{
+    _skipRemoteCount++; // update(): 1イベント
+    const snapPlayers=[...A.newPlayers,...newPlayersToAdd].map(p=>({...p}));
+    const updates={};
+    updates['newPlayers']=snapPlayers;
+    updates['completedSessionsById/'+session.id]=session;
+    updates['completedSessionIndex/'+session.id]={id:session.id,start:session.start||'',end:session.end||'',playerCount:(session.players||[]).length,gameCount:(session.games||[]).length};
+    fbDb.ref(FB_PATH).update(updates,err=>{
       hideLoading();
       if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('登録エラー: '+err.message);return;}
-      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('登録できませんでした。再度お試しください。');return;}
-      if(snap&&snap.val())mergeRemote(snap.val());
+      // ローカル状態を更新
+      A.newPlayers.push(...newPlayersToAdd);
+      A.completedSessions.push(session);
+      invalidateStatsCache();
       closeModal('m-bulk-import');renderSession();updateHdrBadge();toast(doneMsg);_bulkData=null;
     });
   } else {
@@ -2754,18 +2809,18 @@ function saveEditSessMeta(){
   const note=document.getElementById('edit-sess-note').value;
   const sessId=editingSessId;
   if(fbDb&&fbReady){
-    // Firebase: Atomic transaction で completedSessions を更新
+    // completedSessionsById/{id} のみに transaction（root全体を読まない）
     _skipRemoteCount++;
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return;
-      const sessions=Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});
-      const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
-      sessions[si]={...sessions[si],start,end,note};
-      return{...cur,completedSessions:sessions};
+    fbDb.ref(FB_COMPLETED+'/'+sessId).transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      return{...cur,start,end,note};
     },(err,committed,snap)=>{
       if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('保存エラー: '+err.message);return;}
       if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('更新できませんでした');return;}
-      if(snap&&snap.val())mergeRemote(snap.val());
+      // index も更新（best-effort）
+      const localSess=A.completedSessions.find(s=>s&&s.id===sessId);
+      fbDb.ref(FB_IDX+'/'+sessId).update({start,end,id:sessId});
+      if(localSess){localSess.start=start;localSess.end=end;localSess.note=note;invalidateStatsCache();}
       closeModal('m-edit-sess-meta');openSessDetail(sessId);toast('更新しました');
     });
   } else {
@@ -2848,17 +2903,37 @@ function importBackup(input){
         });
         if(fbDb&&fbReady){
           showLoading('復元中...');
-          _skipRemoteCount++;
-          fbDb.ref(FB_PATH).transaction(cur=>{
-            const base=cur||{};
-            return{...base,newPlayers,completedSessions,activeSession:null};
-          },(err,committed,snap)=>{
-            hideLoading();
-            if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('復元エラー: '+err.message);return;}
-            if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('復元できませんでした');return;}
-            if(snap&&snap.val())mergeRemote(snap.val());
-            closeModal('m-confirm');refreshCurrentTab();updateHdrBadge();
-            toast(`復元完了（${sRows.length}セッション・${gRows.length}局）`);
+          // update()でcompletedSessionsById + index + newPlayers + activeSession=null を書き込み
+          // 既存completedSessionsByIdはnullにリセット後に書き込む
+          // まず既存データの把握のために once() を使う（旧形式含む削除のため）
+          fbDb.ref(FB_PATH).once('value',rootSnap=>{
+            const rootData=rootSnap.val()||{};
+            _skipRemoteCount++; // update(): 1イベント
+            const updates={};
+            updates['newPlayers']=newPlayers;
+            updates['activeSession']=null;
+            updates['completedSessions']=null; // 旧形式を削除
+            // 既存のcompletedSessionsByIdをすべてnull（削除）
+            if(rootData.completedSessionsById){
+              Object.keys(rootData.completedSessionsById).forEach(k=>{updates['completedSessionsById/'+k]=null;});
+            }
+            if(rootData.completedSessionIndex){
+              Object.keys(rootData.completedSessionIndex).forEach(k=>{updates['completedSessionIndex/'+k]=null;});
+            }
+            // 新しいセッションを書き込み
+            completedSessions.forEach(s=>{
+              updates['completedSessionsById/'+s.id]=s;
+              updates['completedSessionIndex/'+s.id]={id:s.id,start:s.start||'',end:s.end||'',playerCount:(s.players||[]).length,gameCount:(s.games||[]).length};
+            });
+            updates['state']={activeSessionId:null,version:1,updatedAt:Date.now()};
+            fbDb.ref(FB_PATH).update(updates,err=>{
+              hideLoading();
+              if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('復元エラー: '+err.message);return;}
+              A.newPlayers=newPlayers;A.completedSessions=completedSessions;A.activeSession=null;
+              invalidateStatsCache();
+              closeModal('m-confirm');refreshCurrentTab();updateHdrBadge();
+              toast(`復元完了（${sRows.length}セッション・${gRows.length}局）`);
+            });
           });
         } else {
           A.newPlayers=newPlayers;A.completedSessions=completedSessions;A.activeSession=null;
@@ -3082,27 +3157,22 @@ function savePlayer(){
   if(isEdit){const p=A.newPlayers.find(x=>x.id===pid);if(p){p.name=name;p.color=mColor;}}
   else A.newPlayers.push(player);
   if(fbDb&&fbReady){
-    // プレイヤー追加/編集は専用transactionで行う。
-    // saveApp()経由だとリトライ中にmergeRemote()がA.newPlayersを上書きし、追加が消えるため。
+    // /newPlayers パスのみにtransaction（root全体を読まない）
     showLoading(isEdit?'更新中...':'追加中...');
     _skipRemoteCount++;
-    fbDb.ref(FB_PATH).transaction(cur=>{
-      if(!cur)return A;
-      const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
+    fbDb.ref(FB_PATH+'/newPlayers').transaction(cur=>{
+      const srvP=Array.isArray(cur)?cur:Object.values(cur||{});
       if(isEdit){
-        // 編集: 対象IDのエントリだけ更新
         const updated=srvP.map(p=>p&&p.id===pid?{...p,name,color:mColor}:p);
-        return{...cur,newPlayers:updated};
+        return updated;
       } else {
-        // 追加: 同IDが既にあれば上書き（冪等）、なければ末尾に追加
-        if(srvP.some(p=>p&&p.id===pid))
-          return{...cur,newPlayers:srvP.map(p=>p&&p.id===pid?player:p)};
-        return{...cur,newPlayers:[...srvP,player]};
+        if(srvP.some(p=>p&&p.id===pid))return srvP.map(p=>p&&p.id===pid?player:p);
+        return[...srvP,player];
       }
-    },(err,committed,snap)=>{
+    },(err,committed)=>{
       hideLoading();
       if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('エラー: '+err.message);return;}
-      if(committed&&snap&&snap.val())mergeRemote(snap.val());
+      if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;}
       closeModal('m-player');renderSettings();toast(isEdit?'更新しました':'追加しました');
     });
   } else {
@@ -3116,14 +3186,13 @@ function delPlayer(id){
     if(fbDb&&fbReady){
       showLoading('プレイヤーを削除中...');
       _skipRemoteCount++;
-      fbDb.ref(FB_PATH).transaction(cur=>{
-        if(!cur)return;
-        const srvP=Array.isArray(cur.newPlayers)?cur.newPlayers:Object.values(cur.newPlayers||{});
-        return{...cur,newPlayers:srvP.filter(p=>p&&p.id!==id)};
-      },(err,committed,snap)=>{
+      fbDb.ref(FB_PATH+'/newPlayers').transaction(cur=>{
+        const srvP=Array.isArray(cur)?cur:Object.values(cur||{});
+        return srvP.filter(p=>p&&p.id!==id);
+      },(err,committed)=>{
         hideLoading();
         if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('削除エラー: '+err.message);return;}
-        if(committed&&snap&&snap.val())mergeRemote(snap.val());
+        if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;}
         toast('削除しました');
       });
     } else {saveApp();toast('削除しました');}
