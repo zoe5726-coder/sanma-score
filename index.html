@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260425-1157';
+const APP_VERSION = 'v14-20260427-0914';
 const FB_PATH = 'sanma/v2';
 
 // ══ HISTORICAL DATA (空) ══
@@ -648,15 +648,18 @@ function mergeRemote(data){
   let safeActiveSession=data.activeSession;
   if(safeActiveSession&&typeof safeActiveSession==='object'){
     const players=_fbArr(safeActiveSession.players,A.activeSession?.players||[]);
-    const rawGames=_fbArr(safeActiveSession.games,A.activeSession?.games||[]);
-    // 各ゲームも [timestamp, [[pid,pts,rank,tobi],...]] 形式に正規化
+    // games は配列・数値キーobject・gameIdキーobject のいずれでも _fbGames で順序保証
+    const rawGames=_fbGames(safeActiveSession);
+    // 各ゲームを [timestamp, [[pid,pts,rank,tobi],...], gameId?] 形式に正規化
     const games=rawGames.map(g=>{
       if(!g)return g;
       const gArr=Array.isArray(g)?g:_fbArr(g,[]);
       const ts=gArr[0]||'';
       const playerData=_fbArr(gArr[1],null);
       const normalizedPd=playerData?playerData.map(pd=>Array.isArray(pd)?pd:_fbArr(pd,[])):[];
-      return[ts,normalizedPd];
+      const norm=[ts,normalizedPd];
+      if(gArr[2]!==undefined&&gArr[2]!==null)norm[2]=gArr[2]; // gameId を保持（ロールバック追跡用）
+      return norm;
     });
     safeActiveSession={...safeActiveSession,players,games,chips:safeActiveSession.chips||{}};
   }
@@ -777,7 +780,31 @@ function saveApp(){
 // ── セッション操作の共通ヘルパー ──
 // _fbSessions(): Firebase の completedSessions を配列として取得
 function _fbSessions(cur){return Array.isArray(cur.completedSessions)?cur.completedSessions:Object.values(cur.completedSessions||{});}
-function _fbGames(cur){return Array.isArray(cur.games)?cur.games:Object.values(cur.games||{});}
+// _fbGames(): games を順序保証付き配列として取得（数値キー・push キー・配列すべて対応）
+function _fbGames(cur){
+  const raw=cur&&cur.games;
+  if(!raw)return[];
+  if(Array.isArray(raw))return raw;
+  if(typeof raw==='object'){
+    return Object.keys(raw).sort((a,b)=>{const na=Number(a),nb=Number(b);return(isNaN(na)||isNaN(nb))?(a<b?-1:a>b?1:0):na-nb;}).map(k=>raw[k]);
+  }
+  return[];
+}
+// ── _normalizeActiveSession(): /activeSession スナップから安全なローカル形式へ変換 ──
+// addGameAtomic の成功コールバックなど、root snap なしで activeSession だけ更新する場合に使用
+function _normalizeActiveSession(sv){
+  if(!sv||typeof sv!=='object')return null;
+  const players=_fbArr(sv.players,[]);
+  const games=_fbGames(sv).map(g=>{
+    if(!g)return g;
+    const ga=Array.isArray(g)?g:_fbArr(g,[]);
+    const pd=_fbArr(ga[1],null);
+    const norm=[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+    if(ga[2]!==undefined&&ga[2]!==null)norm[2]=ga[2]; // gameId を保持
+    return norm;
+  });
+  return{...sv,players,games,chips:sv.chips||{}};
+}
 
 // ── startSessionAtomic(): セッション開始（root transaction）──
 // activeSession が既に存在する場合はアボート
@@ -801,101 +828,145 @@ function startSessionAtomic(newSess,onSuccess,onAbort){
   });
 }
 
-// ── addGameAtomic(): 対局追加（root transaction）──
-// サーバーの games 配列に追記する（ローカルスナップショットではなくサーバー値を使う）
-function addGameAtomic(sessId,game,onSuccess,onAbort){
+// ── addGameAtomic(): 対局追加（/activeSession child transaction）──
+// ルート全体ではなく /activeSession パスだけにtransactionをかけることで高速化。
+// completedSessions・settings等は一切読み書きしない。
+// gameId により重複登録を防ぐ（idempotent）。
+function addGameAtomic(sessId,game,gameId,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
   _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur||!cur.activeSession||cur.activeSession.id!==sessId)return; // セッション不一致 → アボート
-    const srvGames=_fbGames(cur.activeSession);
-    return{...cur,activeSession:{...cur.activeSession,games:[...srvGames,game]}};
+  fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+    if(!cur||cur.id!==sessId)return; // セッション不一致 → アボート
+    const raw=cur.games;
+    // 既存 games を object 形式に統一（配列→数値キーobject）
+    let gObj;
+    if(Array.isArray(raw)){gObj={};raw.forEach((g,i)=>{gObj[String(i)]=g;});}
+    else{gObj={...(raw||{})};}
+    if(gObj[gameId])return{...cur}; // 重複 → 冪等で返す（再送しても安全）
+    gObj[gameId]=game;
+    return{...cur,games:gObj};
   },(err,committed,snap)=>{
     if(err||!committed){
       if(_skipRemoteCount>0)_skipRemoteCount--;
-      if(onAbort)onAbort(committed===false?'session_changed':'error');
+      if(onAbort)onAbort(!committed?'session_changed':'error');
       return;
     }
-    if(A.activeSession&&A.activeSession.id===sessId&&snap&&snap.val()&&snap.val().activeSession)
-      A.activeSession=snap.val().activeSession;
+    // snap.val() = /activeSession ノードのみ（root ではない）
+    if(snap&&snap.val()&&A.activeSession&&A.activeSession.id===sessId)
+      A.activeSession=_normalizeActiveSession(snap.val());
     if(onSuccess)onSuccess();
   });
 }
 
-// ── updateGameAtomic(): 対局スコア更新（root transaction、タイムスタンプ検証付き）──
+// ── updateGameAtomic(): 対局スコア更新（タイムスタンプ検証付き）──
+// active session: /activeSession child transaction（高速）
+// completed session: root transaction（completedSessions 操作に必要）
 function updateGameAtomic(sessId,gameIdx,expectedTs,newGameData,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
   const isActive=A.activeSession&&A.activeSession.id===sessId;
   _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur)return;
-    if(isActive){
-      if(!cur.activeSession||cur.activeSession.id!==sessId)return;
-      const g=[..._fbGames(cur.activeSession)];
+  if(isActive){
+    // active: /activeSession パスのみ（completedSessions 不要）
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      const g=[..._fbGames(cur)];
       if(!g[gameIdx]||g[gameIdx][0]!==expectedTs)return; // タイムスタンプ不一致 → アボート
-      g[gameIdx]=newGameData;
-      return{...cur,activeSession:{...cur.activeSession,games:g}};
-    } else {
+      // games を object 形式で保持しつつ、対象インデックスを更新
+      const raw=cur.games;
+      if(Array.isArray(raw)){
+        const newG=[...raw];newG[gameIdx]=newGameData;return{...cur,games:newG};
+      } else {
+        const keys=Object.keys(raw).sort((a,b)=>{const na=Number(a),nb=Number(b);return(isNaN(na)||isNaN(nb))?(a<b?-1:a>b?1:0):na-nb;});
+        const targetKey=keys[gameIdx];if(!targetKey)return;
+        return{...cur,games:{...raw,[targetKey]:newGameData}};
+      }
+    },(err,committed,snap)=>{
+      if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
+      if(snap&&snap.val()&&A.activeSession&&A.activeSession.id===sessId)A.activeSession=_normalizeActiveSession(snap.val());
+      if(onSuccess)onSuccess();
+    });
+  } else {
+    // completed: root transaction（completedSessions 内を更新）
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return;
       const sessions=[..._fbSessions(cur)];
       const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
       const g=[..._fbGames(sessions[si])];
       if(!g[gameIdx]||g[gameIdx][0]!==expectedTs)return;
       g[gameIdx]=newGameData;sessions[si]={...sessions[si],games:g};
       return{...cur,completedSessions:sessions};
-    }
-  },(err,committed,snap)=>{
-    if(err||!committed){
-      if(_skipRemoteCount>0)_skipRemoteCount--;
-      if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;
-    }
-    if(isActive&&A.activeSession&&snap&&snap.val()&&snap.val().activeSession)
-      A.activeSession=snap.val().activeSession;
-    else if(!isActive&&snap&&snap.val())mergeRemote(snap.val());
-    if(onSuccess)onSuccess();
-  });
+    },(err,committed,snap)=>{
+      if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
+      if(snap&&snap.val())mergeRemote(snap.val());
+      if(onSuccess)onSuccess();
+    });
+  }
 }
 
-// ── deleteGameAtomic(): 対局削除（root transaction、タイムスタンプ検証付き）──
+// ── deleteGameAtomic(): 対局削除（タイムスタンプ検証付き）──
+// active session: /activeSession child transaction（高速）
+// completed session: root transaction
 function deleteGameAtomic(sessId,gameIdx,gameTs,isActive,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
   _skipRemoteCount++;
-  fbDb.ref(FB_PATH).transaction(cur=>{
-    if(!cur)return;
-    if(isActive){
-      if(!cur.activeSession||cur.activeSession.id!==sessId)return;
-      const g=[..._fbGames(cur.activeSession)];
-      if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return;
-      g.splice(gameIdx,1);
-      return{...cur,activeSession:{...cur.activeSession,games:g}};
-    } else {
+  if(isActive){
+    // active: /activeSession パスのみ
+    fbDb.ref(FB_PATH+'/activeSession').transaction(cur=>{
+      if(!cur||cur.id!==sessId)return;
+      const raw=cur.games;
+      if(Array.isArray(raw)){
+        if(!raw[gameIdx]||raw[gameIdx][0]!==gameTs)return;
+        const newG=[...raw];newG.splice(gameIdx,1);return{...cur,games:newG};
+      } else {
+        const keys=Object.keys(raw).sort((a,b)=>{const na=Number(a),nb=Number(b);return(isNaN(na)||isNaN(nb))?(a<b?-1:a>b?1:0):na-nb;});
+        const targetKey=keys[gameIdx];if(!targetKey)return;
+        const entry=Array.isArray(raw[targetKey])?raw[targetKey]:_fbArr(raw[targetKey],[]);
+        if(!entry||entry[0]!==gameTs)return;
+        const newGObj={...raw};delete newGObj[targetKey];return{...cur,games:newGObj};
+      }
+    },(err,committed,snap)=>{
+      if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
+      if(snap&&snap.val()&&A.activeSession&&A.activeSession.id===sessId)A.activeSession=_normalizeActiveSession(snap.val());
+      if(onSuccess)onSuccess();
+    });
+  } else {
+    // completed: root transaction
+    fbDb.ref(FB_PATH).transaction(cur=>{
+      if(!cur)return;
       const sessions=[..._fbSessions(cur)];
       const si=sessions.findIndex(s=>s&&s.id===sessId);if(si===-1)return;
       const g=[..._fbGames(sessions[si])];
       if(!g[gameIdx]||g[gameIdx][0]!==gameTs)return;
       g.splice(gameIdx,1);sessions[si]={...sessions[si],games:g};
       return{...cur,completedSessions:sessions};
-    }
-  },(err,committed,snap)=>{
-    if(err||!committed){
-      if(_skipRemoteCount>0)_skipRemoteCount--;
-      if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;
-    }
-    if(isActive&&A.activeSession&&snap&&snap.val()&&snap.val().activeSession)
-      A.activeSession=snap.val().activeSession;
-    else if(!isActive&&snap&&snap.val())mergeRemote(snap.val());
-    if(onSuccess)onSuccess();
-  });
+    },(err,committed,snap)=>{
+      if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;if(onAbort)onAbort(!committed?'timestamp_mismatch':'error');return;}
+      if(snap&&snap.val())mergeRemote(snap.val());
+      if(onSuccess)onSuccess();
+    });
+  }
 }
 
 // ── endSessionAtomic(): セッション終了（root transaction）──
 // activeSession=null + completedSessions への追記 を単一 transaction で実行
+// games はサーバー側の値を正規化して使う（楽観更新で追加された対局も含まれる）
 function endSessionAtomic(sessId,sessData,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
   _skipRemoteCount++;
   fbDb.ref(FB_PATH).transaction(cur=>{
     if(!cur||!cur.activeSession||cur.activeSession.id!==sessId)return; // 既に終了済み → アボート
+    // サーバーの games を正規化（object 形式・配列形式両対応）
+    const svGames=_fbGames(cur.activeSession).map(g=>{
+      if(!g)return g;
+      const ga=Array.isArray(g)?g:_fbArr(g,[]);
+      const pd=_fbArr(ga[1],null);
+      return[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+    });
+    const svPlayers=_fbArr(cur.activeSession.players,sessData.players||[]);
+    // sessData の chips/end/note を使い、games/players はサーバー値を優先
+    const sessToSave={...sessData,games:svGames,players:svPlayers};
     const completed=[..._fbSessions(cur)];
-    return{...cur,activeSession:null,completedSessions:[...completed,sessData]};
+    return{...cur,activeSession:null,completedSessions:[...completed,sessToSave]};
   },(err,committed,snap)=>{
     if(err){
       if(_skipRemoteCount>0)_skipRemoteCount--;
@@ -932,7 +1003,7 @@ function updateActiveSessionAtomic(sessId,applyFn,onSuccess){
     return applyFn({...cur});
   },(err,committed,snap)=>{
     if(err||!committed){if(_skipRemoteCount>0)_skipRemoteCount--;return;}
-    if(A.activeSession&&A.activeSession.id===sessId&&snap&&snap.val())A.activeSession=snap.val();
+    if(A.activeSession&&A.activeSession.id===sessId&&snap&&snap.val())A.activeSession=_normalizeActiveSession(snap.val());
     if(onSuccess)onSuccess();
   });
 }
@@ -1951,15 +2022,44 @@ function saveGameToSession(){
     res=directPts(vals);
   }
   const now=new Date();const localNow=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  const game=[localNow,res.map(r=>[r.pid,r.pts,r.rank,r.pts<=-60?1:0])];
+  // gameId: タイムスタンプ+乱数（数値文字列にすることで _fbGames のソートが正しく機能する）
+  const gameId=String(Date.now())+String(Math.floor(Math.random()*1000)).padStart(3,'0');
+  // game[2] に gameId を格納してロールバック追跡を可能に
+  const game=[localNow,res.map(r=>[r.pid,r.pts,r.rank,r.pts<=-60?1:0]),gameId];
+  const sessId=A.activeSession.id;
+
   if(fbDb&&fbReady){
-    const sessId=A.activeSession.id;
-    setModalLoading('m-add-game',true,'保存中...');
-    addGameAtomic(sessId,game,
-      ()=>{setModalLoading('m-add-game',false);closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');},
-      (reason)=>{setModalLoading('m-add-game',false);toast(reason==='session_changed'?'⚠ セッションが変更されました。再度お試しください':'保存エラー');}
+    // ── 楽観的 UI 更新: Firebase 応答を待たず即時閉じる ──
+    // 二重タップ防止: ボタンを即無効化
+    const saveBtn=document.querySelector('#m-add-game .mact .btn-p');
+    if(saveBtn)saveBtn.disabled=true;
+    // ローカルに追加して即描画
+    A.activeSession.games.push(game);
+    closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
+    // バックグラウンドで Firebase に保存（/activeSession child transaction のみ）
+    addGameAtomic(sessId,game,gameId,
+      ()=>{ /* 成功: 既に UI 反映済み */ },
+      (reason)=>{
+        // 失敗: gameId で対象だけロールバック
+        if(A.activeSession&&A.activeSession.id===sessId){
+          const idx=A.activeSession.games.findIndex(g=>g&&g[2]===gameId);
+          if(idx!==-1){
+            A.activeSession.games.splice(idx,1);renderSession();
+          } else {
+            // mergeRemote が先に走った場合はサーバー再取得で整合させる
+            fbDb.ref(FB_PATH+'/activeSession').once('value',s=>{
+              const sv=s.val();
+              if(sv&&A.activeSession&&sv.id===A.activeSession.id)A.activeSession=_normalizeActiveSession(sv);
+              else if(!sv){A.activeSession=null;updateHdrBadge();}
+              renderSession();
+            });
+          }
+        }
+        toast(reason==='session_changed'?'⚠ セッションが変更されました。再試行してください':'⚠ 対局の保存に失敗しました');
+      }
     );
   } else {
+    // オフライン: ローカルに追加して localStorage 保存
     A.activeSession.games.push(game);
     saveApp();closeModal('m-add-game');sessGameSel=[];renderSession();toast('対局を追加しました');
   }
@@ -2017,7 +2117,14 @@ function endSession(){
   }
   const note=document.getElementById('sess-note').value;
   const sessId=A.activeSession.id;
-  const sessData={...A.activeSession,end:endDt,note};
+  // games を配列形式に正規化（楽観更新で object 形式になっている場合に対応）
+  const normalizedGames=_fbGames(A.activeSession).map(g=>{
+    if(!g)return g;
+    const ga=Array.isArray(g)?g:_fbArr(g,[]);
+    const pd=_fbArr(ga[1],null);
+    return[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
+  });
+  const sessData={...A.activeSession,games:normalizedGames,end:endDt,note};
   if(fbDb&&fbReady){
     setModalLoading('m-end-sess',true,'保存中...');
     endSessionAtomic(sessId,sessData,
