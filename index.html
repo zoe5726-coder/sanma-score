@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260427-1336';
+const APP_VERSION = 'v14-20260427-1501';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -736,6 +736,8 @@ function loadApp(){
           fbDb.ref(FB_PATH).update(mig);
         }
       }
+      // ── 整合性チェック: resumeSessionの途中失敗などで生じた不整合を修復 ──
+      recoverConsistency(data);
       syncSettingsUI();updateHdrBadge();setSyncStatus('synced','同期済み');go(currentTab||'home');
     } else {
       if(_skipRemoteCount>0){_skipRemoteCount--;setSyncStatus('synced','同期済み');return;}
@@ -1736,7 +1738,8 @@ function forceResetSession(){
     ()=>{
       closeModal('m-confirm');
       if(fbDb&&fbReady){
-        fbDb.ref(FB_PATH+'/activeSession').remove()
+        const updates={'activeSession':null,'state/activeSessionId':null,'state/updatedAt':Date.now()};
+        fbDb.ref(FB_PATH).update(updates)
           .then(()=>{A.activeSession=null;updateHdrBadge();renderSession();toast('セッションを強制リセットしました');})
           .catch(e=>toast('エラー: '+e.message));
       } else {
@@ -2410,63 +2413,152 @@ function adminDeleteSession(id){
     }
   },'削除');
 }
+// ── recoverConsistency(): 起動時の整合性チェック＆自動修復 ──
+// resumeSession 等の途中失敗で生じた以下の不整合を検出・修復する：
+// [1] state.activeSessionId があるのに activeSession がない
+// [2] activeSession があるのに state.activeSessionId が null
+// [3] activeSession と completedSessionsById に同じ id が存在
+// [4] completedSessionIndex にあるが completedSessionsById に本体がない
+function recoverConsistency(data){
+  if(!fbDb||!fbReady||!data)return;
+  const stateNode=data.state||{};
+  const stateId=stateNode.activeSessionId||null;
+  const activeSess=data.activeSession||null;
+  const byId=data.completedSessionsById||{};
+  const byIdx=data.completedSessionIndex||{};
+  const fixes={};
+  let hasFix=false;
+  // [1] state.activeSessionId が設定済みだが activeSession がない
+  if(stateId&&!activeSess){
+    const frozenRaw=byId[stateId];
+    if(frozenRaw){
+      // resumeSessionWithData の step2(set activeSession)が失敗したケース → 再試行
+      console.warn('[sanma] recover[1]: activeSession書き込み失敗を検出、再試行 id='+stateId);
+      const revivedSess={...frozenRaw};delete revivedSess.end;
+      // set() が成功したら step3 のクリーンアップも続けて行う
+      _skipRemoteCount++; // set /activeSession: 1イベント
+      fbDb.ref(FB_ACTIVE).set(revivedSess,setErr=>{
+        if(setErr){
+          // 再試行も失敗 → ロックを解除してユーザーに再試行させる
+          if(_skipRemoteCount>0)_skipRemoteCount--;
+          console.warn('[sanma] recover[1]: 再試行失敗、stateロック解除');
+          fbDb.ref(FB_STATE).update({activeSessionId:null,updatedAt:Date.now()});
+          return;
+        }
+        // 書き込み成功 → クリーンアップ（step3相当）
+        _skipRemoteCount++; // update(): 1イベント
+        fbDb.ref(FB_PATH).update({
+          ['completedSessionsById/'+stateId]:null,
+          ['completedSessionIndex/'+stateId]:null
+        });
+        A.activeSession=_normalizeActiveSession(revivedSess);
+        A.completedSessions=A.completedSessions.filter(s=>s&&s.id!==stateId);
+        invalidateStatsCache();updateHdrBadge();renderSession();
+        toast('前回の再開処理を復元しました');
+      });
+    } else {
+      // completedSessionsById にも対象セッションがない → stateロックが宙ぶらり
+      console.warn('[sanma] recover[1]: 孤立したstate.activeSessionId='+stateId+' をクリア');
+      fixes['state/activeSessionId']=null;fixes['state/updatedAt']=Date.now();hasFix=true;
+    }
+  }
+  // [2] activeSession はあるが state.activeSessionId が null
+  if(activeSess&&!stateId){
+    console.warn('[sanma] recover[2]: state.activeSessionId 欠落、同期 id='+activeSess.id);
+    fixes['state/activeSessionId']=activeSess.id;fixes['state/updatedAt']=Date.now();hasFix=true;
+  }
+  // [3] activeSession と completedSessionsById に同じ id（resumeのstep3失敗）
+  if(activeSess&&byId[activeSess.id]){
+    console.warn('[sanma] recover[3]: completedSessionsByIdに重複 id='+activeSess.id+' を削除');
+    fixes['completedSessionsById/'+activeSess.id]=null;
+    fixes['completedSessionIndex/'+activeSess.id]=null;hasFix=true;
+  }
+  // [4] completedSessionIndex にあるが completedSessionsById に本体がない
+  Object.keys(byIdx).forEach(id=>{
+    if(!byId[id]){
+      console.warn('[sanma] recover[4]: 孤立したindexエントリ id='+id+' を削除');
+      fixes['completedSessionIndex/'+id]=null;hasFix=true;
+    }
+  });
+  if(hasFix){_skipRemoteCount++;fbDb.ref(FB_PATH).update(fixes);}
+}
+
+// ── resumeSession(): 完了済みセッションを再開 ──
+// 安全な3ステップ: ①stateロック → ②activeSession書き込み → ③completedSessionsById削除
+// 各ステップの失敗時に補償処理（rollback）を実行する。
+// どの段階で失敗しても、次回起動時に recoverConsistency() が修復する。
 function resumeSession(id){
-  if(fbDb && fbReady){
+  if(fbDb&&fbReady){
     showLoading('セッションを再開中...');
-    // ① completedSessionsById/{id} を一度読んでセッションデータを取得
+    // セッションデータを取得（completedSessionsById優先、旧形式はローカルにフォールバック）
     fbDb.ref(FB_COMPLETED+'/'+id).once('value',sessSnap=>{
       const sessRaw=sessSnap.val();
       if(!sessRaw||sessRaw.id!==id){
-        hideLoading();
-        // 旧形式（completedSessions配列）のフォールバック: ローカルデータを使用
+        // 旧形式フォールバック
         const localSess=A.completedSessions.find(s=>s&&s.id===id);
-        if(!localSess){toast('セッションが見つかりません');return;}
+        if(!localSess){hideLoading();toast('セッションが見つかりません');return;}
         _resumeSessionWithData(id,localSess);
-        return;
+      } else {
+        _resumeSessionWithData(id,sessRaw);
       }
-      _resumeSessionWithData(id,sessRaw);
-    },err=>{
-      hideLoading();toast('読み込みエラー: '+err.message);
-    });
+    },err=>{hideLoading();toast('読み込みエラー: '+err.message);});
   } else {
-    // Firebase なしのローカル処理のみ
-    if(A.activeSession){ toast('セッションが進行中です。先に終了してください。'); return; }
-    const idx = A.completedSessions.findIndex(x=>x.id===id);
-    if(idx === -1) return;
-    const sess = {...A.completedSessions[idx]};
-    A.completedSessions.splice(idx,1);
-    delete sess.end;
-    A.activeSession = sess;
-    saveApp();
-    updateHdrBadge(); renderSession(); go('session'); toast('セッションを再開しました');
+    if(A.activeSession){toast('セッションが進行中です。先に終了してください。');return;}
+    const idx=A.completedSessions.findIndex(x=>x.id===id);if(idx===-1)return;
+    const sess={...A.completedSessions[idx]};
+    A.completedSessions.splice(idx,1);delete sess.end;A.activeSession=sess;
+    saveApp();updateHdrBadge();renderSession();go('session');toast('セッションを再開しました');
   }
 }
-// resumeSession の実処理: セッションデータ取得後に /activeSession transaction でアトミックに開始
+
+// _resumeSessionWithData(): 3ステップの安全な再開処理
+// step1: /state transaction でロック取得（activeSessionId=null を確認してから id をセット）
+// step2: /activeSession に revivedSess を書き込む
+//        失敗 → rollback: state.activeSessionId=null に戻す
+// step3: completedSessionsById/{id} と index を削除（cleanup、best-effort）
+//        失敗しても recoverConsistency [3] が次回起動時に修復する
 function _resumeSessionWithData(id,sessRaw){
-  const revivedSess={...sessRaw};
-  delete revivedSess.end; // 再開時は end を削除
-  _skipRemoteCount++; // /activeSession transaction: 1イベント
-  fbDb.ref(FB_ACTIVE).transaction(cur=>{
-    if(cur!==null&&cur!==undefined)return; // 進行中セッションあり → アボート
-    return revivedSess;
+  const revivedSess={...sessRaw};delete revivedSess.end;
+  // ── step1: /state transaction でロック取得 ──
+  _skipRemoteCount++; // state transaction: 1イベント
+  fbDb.ref(FB_STATE).transaction(cur=>{
+    if(cur&&cur.activeSessionId)return; // ロック取得済み → アボート（別セッション進行中）
+    return{activeSessionId:id,version:((cur&&cur.version)||0)+1,updatedAt:Date.now()};
   },(err,committed)=>{
-    hideLoading();
-    if(err){if(_skipRemoteCount>0)_skipRemoteCount--;toast('再開エラー: '+err.message);return;}
-    if(!committed){if(_skipRemoteCount>0)_skipRemoteCount--;toast('再開できませんでした。既に進行中のセッションがあります。');return;}
-    // activeSession 設定完了。completedSessionsById/{id} + index + state を削除
-    _skipRemoteCount++; // update(): 1イベント
-    const updates={};
-    updates['completedSessionsById/'+id]=null;
-    updates['completedSessionIndex/'+id]=null;
-    updates['state/activeSessionId']=id;
-    updates['state/updatedAt']=Date.now();
-    fbDb.ref(FB_PATH).update(updates);
-    // ローカル状態を更新
-    A.activeSession=_normalizeActiveSession(revivedSess);
-    A.completedSessions=A.completedSessions.filter(s=>s&&s.id!==id);
-    invalidateStatsCache();
-    if(document.getElementById('m-sess-detail')?.classList.contains('on'))closeModal('m-sess-detail');
-    updateHdrBadge();renderSession();go('session');toast('セッションを再開しました');
+    if(err){
+      if(_skipRemoteCount>0)_skipRemoteCount--;
+      hideLoading();toast('再開エラー: '+err.message);return;
+    }
+    if(!committed){
+      if(_skipRemoteCount>0)_skipRemoteCount--;
+      hideLoading();toast('再開できませんでした。既に進行中のセッションがあります。');return;
+    }
+    // ── step2: /activeSession を書き込む ──
+    _skipRemoteCount++; // set /activeSession: 1イベント
+    fbDb.ref(FB_ACTIVE).set(revivedSess,setErr=>{
+      if(setErr){
+        // 書き込み失敗 → rollback: state.activeSessionId を null に戻す
+        if(_skipRemoteCount>0)_skipRemoteCount--;
+        console.warn('[sanma] resumeSession step2失敗、state rollback');
+        // rollback はスキップしない（mergeRemoteに任せる）
+        fbDb.ref(FB_STATE).update({activeSessionId:null,updatedAt:Date.now()});
+        hideLoading();toast('再開に失敗しました。再度お試しください（'+setErr.message+')');return;
+      }
+      // ── step3: completedSessionsById/{id} + index を削除（cleanup）──
+      // best-effort: 失敗しても recoverConsistency[3] が次回修復する
+      _skipRemoteCount++; // update(): 1イベント
+      fbDb.ref(FB_PATH).update({
+        ['completedSessionsById/'+id]:null,
+        ['completedSessionIndex/'+id]:null
+      });
+      // ローカル状態を更新（step2成功時点で確定）
+      A.activeSession=_normalizeActiveSession(revivedSess);
+      A.completedSessions=A.completedSessions.filter(s=>s&&s.id!==id);
+      invalidateStatsCache();
+      hideLoading();
+      if(document.getElementById('m-sess-detail')?.classList.contains('on'))closeModal('m-sess-detail');
+      updateHdrBadge();renderSession();go('session');toast('セッションを再開しました');
+    });
   });
 }
 
