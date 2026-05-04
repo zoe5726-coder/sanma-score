@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260427-1730';
+const APP_VERSION = 'v14-20260504-1034';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -557,11 +557,11 @@ function signInWithGoogle(){
 
 function checkAllowed(user){
   const key=encodeEmail(user.email);
+  const fallbackName=user.displayName||user.email?.split('@')[0]||'';
+  // エラーコールバックを追加して Uncaught Promise Rejection を防ぐ
   fbDb.ref('config/allowedUsers/'+key).once('value',snap=>{
-    const fallbackName=user.displayName||user.email?.split('@')[0]||'';
     if(snap.val()){
       currentUser={uid:user.uid,email:user.email,name:fallbackName,photo:user.photoURL,...snap.val()};
-      // Firebase保存のnameがnullの場合はfallbackを使用
       if(!currentUser.name)currentUser.name=fallbackName;
       showApp();loadApp();
     } else {
@@ -575,7 +575,25 @@ function checkAllowed(user){
           fbAuth.signOut();
           showLoginError('このアカウントはアクセスが許可されていません。\n管理者に連絡してください。');
         }
+      },err=>{
+        // config/allowedUsers 全体の読み取りが拒否された場合
+        // → セキュリティルールが認証済みユーザーに個人エントリの読み取りを許可していない
+        console.error('[sanma] checkAllowed allSnap error:',err);
+        fbAuth.signOut();
+        showLoginError('アクセス確認エラー: Firebaseのセキュリティルールを確認してください。\n('+err.message+')');
       });
+    }
+  },err=>{
+    // permission_denied: セキュリティルール未設定、またはアクセス未許可
+    // → ルールが "authenticated users can read own entry" を許可していない可能性
+    console.error('[sanma] checkAllowed error:',err);
+    if(err.code==='PERMISSION_DENIED'||err.message?.includes('permission_denied')){
+      // ルール起因 → 管理者が手動で許可するまでアクセス不可
+      fbAuth.signOut();
+      showLoginError('アクセスが拒否されました。\n管理者に連絡してアクセス許可を依頼してください。\n(Firebase rules: permission_denied)');
+    } else {
+      fbAuth.signOut();
+      showLoginError('認証エラー: '+err.message);
     }
   });
 }
