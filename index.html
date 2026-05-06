@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260506-1257';
+const APP_VERSION = 'v14-20260506-2340';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1897,7 +1897,26 @@ function startSession(){
     setModalLoading('m-start-sess',true,'開始中...');
     startSessionAtomic(newSess,
       ()=>{setModalLoading('m-start-sess',false);closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');},
-      (reason)=>{setModalLoading('m-start-sess',false);toast(reason==='already_exists'?'⚠ 他のユーザーがすでにセッションを開始しています':'保存エラー');}
+      (reason)=>{
+        setModalLoading('m-start-sess',false);
+        if(reason==='already_exists'){
+          toast('⚠ 他のユーザーがすでにセッションを開始しています');
+          closeModal('m-start-sess');
+          window._sessSelPlayers=[];
+          // _skipRemoteCount により他ユーザーのセッション受信イベントが飛ばされた可能性があるため
+          // activeSession を強制再取得してUIを最新状態に更新する
+          fbDb.ref(FB_ACTIVE).once('value',snap=>{
+            const sv=snap.val();
+            if(sv&&typeof sv==='object'){
+              A.activeSession=_normalizeActiveSession(sv);
+              updateHdrBadge();renderSession();
+              go('session');
+            }
+          });
+        } else {
+          toast('保存エラー');
+        }
+      }
     );
   } else {
     A.activeSession=newSess;
