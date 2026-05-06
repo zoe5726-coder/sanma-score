@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260504-1034';
+const APP_VERSION = 'v14-20260506-1257';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -788,8 +788,8 @@ function loadApp(){
         if(hadActive&&!hasActive){showSyncBanner('✅ セッションが終了されました');}
         else if(!hadActive&&hasActive){showSyncBanner('🎮 セッションが開始されました');}
         else{showSyncBanner('☁️ データを受信しました');}
-        // ── 通常受信時も軽量整合性チェック（再読み込みなしに途中失敗から自動復旧）──
-        recoverConsistency(data);
+        // recoverConsistency は初回ロード時のみ実行（通常イベントでの全件照合は不要）
+        // セッション開始・終了・再開の失敗による不整合はアプリ再読み込み時に修復される
       }
       setSyncStatus('synced','同期済み');
     }
