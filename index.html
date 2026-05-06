@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260506-2344';
+const APP_VERSION = 'v14-20260506-2346';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -2147,6 +2147,7 @@ function saveGameToSession(){
           const idx=A.activeSession.games.findIndex(g=>g&&g[2]===gameId);
           if(idx!==-1){
             A.activeSession.games.splice(idx,1);
+            renderSession(); // 即時フィードバック（ロールバックを即反映）
             // ロールバック後、セッション自体が終了していないか確認（session_changed の場合）
             fbDb.ref(FB_ACTIVE).once('value',s=>{
               const sv=s.val();
