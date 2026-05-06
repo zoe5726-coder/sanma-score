@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260506-2340';
+const APP_VERSION = 'v14-20260506-2344';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -2146,10 +2146,17 @@ function saveGameToSession(){
         if(A.activeSession&&A.activeSession.id===sessId){
           const idx=A.activeSession.games.findIndex(g=>g&&g[2]===gameId);
           if(idx!==-1){
-            A.activeSession.games.splice(idx,1);renderSession();
+            A.activeSession.games.splice(idx,1);
+            // ロールバック後、セッション自体が終了していないか確認（session_changed の場合）
+            fbDb.ref(FB_ACTIVE).once('value',s=>{
+              const sv=s.val();
+              if(!sv){A.activeSession=null;updateHdrBadge();}
+              else if(sv.id===sessId)A.activeSession=_normalizeActiveSession(sv);
+              renderSession();
+            });
           } else {
             // mergeRemote が先に走った場合はサーバー再取得で整合させる
-            fbDb.ref(FB_PATH+'/activeSession').once('value',s=>{
+            fbDb.ref(FB_ACTIVE).once('value',s=>{
               const sv=s.val();
               if(sv&&A.activeSession&&sv.id===A.activeSession.id)A.activeSession=_normalizeActiveSession(sv);
               else if(!sv){A.activeSession=null;updateHdrBadge();}
@@ -2233,8 +2240,18 @@ function endSession(){
       ()=>{setModalLoading('m-end-sess',false);closeModal('m-end-sess');updateHdrBadge();renderSession();toast('セッションを保存しました');},
       (reason,errMsg)=>{
         setModalLoading('m-end-sess',false);
-        if(reason==='already_ended'){toast('⚠ このセッションは既に他のユーザーが終了しました');A.activeSession=null;closeModal('m-end-sess');updateHdrBadge();renderSession();}
-        else{toast('保存エラー: '+(errMsg||'不明なエラー'));}
+        if(reason==='already_ended'){
+          toast('⚠ このセッションは既に他のユーザーが終了しました');
+          A.activeSession=null;closeModal('m-end-sess');updateHdrBadge();renderSession();
+          // _skipRemoteCount により完了済みセッションの受信イベントが飛んだ可能性があるため強制取得
+          fbDb.ref(FB_COMPLETED+'/'+sessId).once('value',snap=>{
+            const sv=snap.val();
+            if(sv&&sv.id===sessId){
+              const norm=normalizeSession(sv);
+              if(norm){A.completedSessions=[norm,...A.completedSessions.filter(s=>s&&s.id!==sessId)];invalidateStatsCache();renderSession();}
+            }
+          });
+        } else{toast('保存エラー: '+(errMsg||'不明なエラー'));}
       }
     );
   } else {
@@ -2619,7 +2636,13 @@ function _resumeSessionWithData(id,sessRaw){
     }
     if(!committed){
       if(_skipRemoteCount>0)_skipRemoteCount--;
-      hideLoading();toast('再開できませんでした。既に進行中のセッションがあります。');return;
+      hideLoading();toast('再開できませんでした。既に進行中のセッションがあります。');
+      // _skipRemoteCount により進行中セッションの受信イベントが飛んだ可能性があるため強制取得
+      fbDb.ref(FB_ACTIVE).once('value',snap=>{
+        const sv=snap.val();
+        if(sv&&typeof sv==='object'){A.activeSession=_normalizeActiveSession(sv);updateHdrBadge();renderSession();go('session');}
+      });
+      return;
     }
     // ── step2: /activeSession を書き込む ──
     _skipRemoteCount++; // set /activeSession: 1イベント
