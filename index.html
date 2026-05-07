@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260507-0858';
+const APP_VERSION = 'v14-20260507-1257';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -874,10 +874,18 @@ function startSessionAtomic(newSess,onSuccess,onAbort){
     if(cur!==null&&cur!==undefined)return; // 既に開始済み → アボート
     return newSess;
   },(err,committed)=>{
-    if(err||!committed){
+    // ── err と committed を厳密に分離 ──
+    // permission_denied などの error を already_exists と混同しない
+    if(err){
       if(_skipRemoteCount>0)_skipRemoteCount--;
-      console.warn('[startSessionAtomic] abort:',{err:err?.message,committed,_skipRemoteCount});
-      if(onAbort)onAbort(committed===false?'already_exists':'error');
+      console.error('[startSessionAtomic] transaction error:',{code:err.code,message:err.message,_skipRemoteCount});
+      if(onAbort)onAbort(err.code==='PERMISSION_DENIED'?'permission_denied':'error',err);
+      return;
+    }
+    if(!committed){
+      if(_skipRemoteCount>0)_skipRemoteCount--;
+      console.warn('[startSessionAtomic] aborted (already_exists):',{_skipRemoteCount});
+      if(onAbort)onAbort('already_exists');
       return;
     }
     // /activeSession への書き込み成功。stateノードを更新（best-effort, 1イベント）
@@ -1911,7 +1919,9 @@ function startSession(){
     // ── ローカルの A.activeSession ではなく Firebase の実態を先に確認 ──
     fbDb.ref(FB_ACTIVE).once('value',snap=>{
       const firebaseActive=snap.val();
-      console.warn('[startSession] pre-check',{
+      console.warn('[startSession debug]',{
+        user:currentUser?.email,
+        admin:currentUser?.admin,
         localActiveSession:!!A.activeSession,
         firebaseActiveSession:!!firebaseActive,
         _skipRemoteCount
@@ -1937,9 +1947,20 @@ function startSession(){
       setModalLoading('m-start-sess',true,'開始中...');
       startSessionAtomic(newSess,
         ()=>{setModalLoading('m-start-sess',false);closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');},
-        (reason)=>{
+        (reason,err)=>{
           setModalLoading('m-start-sess',false);
-          if(reason==='already_exists'){
+          console.warn('[startSession debug] startSessionAtomic abort:',{
+            user:currentUser?.email,
+            admin:currentUser?.admin,
+            reason,
+            errCode:err?.code,
+            errMessage:err?.message,
+            _skipRemoteCount
+          });
+          if(reason==='permission_denied'){
+            // Firebase Rules で write が拒否された（管理者ルールの誤設定等）
+            toast('⚠ 開始権限がありません。Firebase Rulesを確認してください。');
+          } else if(reason==='already_exists'){
             // pre-check と transaction の間に別ユーザーが開始したレアケース
             toast('⚠ 他のユーザーがすでにセッションを開始しています');
             closeModal('m-start-sess');window._sessSelPlayers=[];
@@ -1948,13 +1969,19 @@ function startSession(){
               if(sv&&typeof sv==='object'){A.activeSession=_normalizeActiveSession(sv);updateHdrBadge();renderSession();go('session');}
             });
           } else {
-            toast('保存エラー');
+            toast('保存エラー: '+(err?.message||'不明なエラー'));
           }
         }
       );
     },err=>{
+      // pre-check の once() 自体が permission_denied → Rules で read が拒否されている
+      console.error('[startSession] pre-check permission error:',{code:err.code,message:err.message});
       setModalLoading('m-start-sess',false);
-      toast('接続エラー: '+err.message);
+      if(err.code==='PERMISSION_DENIED'){
+        toast('⚠ 読み取り権限がありません。Firebase Rulesを確認してください。');
+      } else {
+        toast('接続エラー: '+err.message);
+      }
     });
   } else {
     A.activeSession=newSess;
