@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260507-1257';
+const APP_VERSION = 'v14-20260507-1323';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -773,8 +773,11 @@ function loadApp(){
         setSyncStatus('synced','同期済み');return;
       }
       if(data){
-        // 入力中のチップ・スコアをDOMから確定
-        const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();
+        // 対局入力モーダルが開いている間はテンキー確定・UI再描画をスキップする
+        // （入力中に他ユーザーの更新で打ち直しになるのを防ぐ）
+        const addGameOpen=document.getElementById('m-add-game')?.classList.contains('on');
+        // 入力中のチップ・スコアをDOMから確定（対局入力中はスキップ）
+        if(!addGameOpen){const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();}
         // マージ前: 同一セッションのチップローカル値を退避（_pendingChips との照合用）
         const prevSessId=A.activeSession?.id||null;
         const localChips=(prevSessId&&data.activeSession?.id===prevSessId)
@@ -792,13 +795,21 @@ function loadApp(){
           });
         } else if(!A.activeSession||A.activeSession.id!==prevSessId){
           // セッションが終了・切り替わったら pending をすべてクリア
-          clearAllChipPending(); // セッション終了・切り替わり → 全タイマー・全 pending をクリア
+          clearAllChipPending();
         }
         const hasActive=!!A.activeSession;
-        refreshCurrentTab();updateHdrBadge();
-        if(hadActive&&!hasActive){showSyncBanner('✅ セッションが終了されました');}
-        else if(!hadActive&&hasActive){showSyncBanner('🎮 セッションが開始されました');}
-        else{showSyncBanner('☁️ データを受信しました');}
+        if(addGameOpen){
+          // 対局入力中: バッジのみ更新、再描画は入力完了後（モーダルcloseModal時）に実施
+          updateHdrBadge();
+          window._pendingRefreshAfterModal=true;
+          // セッション自体が消えた場合だけは強制クローズ
+          if(hadActive&&!hasActive){closeModal('m-add-game');refreshCurrentTab();showSyncBanner('✅ セッションが終了されました');}
+        } else {
+          refreshCurrentTab();updateHdrBadge();
+          if(hadActive&&!hasActive){showSyncBanner('✅ セッションが終了されました');}
+          else if(!hadActive&&hasActive){showSyncBanner('🎮 セッションが開始されました');}
+          else{showSyncBanner('☁️ データを受信しました');}
+        }
         // recoverConsistency は初回ロード時のみ実行（通常イベントでの全件照合は不要）
         // セッション開始・終了・再開の失敗による不整合はアプリ再読み込み時に修復される
       }
@@ -3471,7 +3482,14 @@ function delPlayer(id){
 
 // ══ MODAL UTILS ══
 function openConfirm(title,msg,fn,btnLabel){document.getElementById('m-ctitle').textContent=title;document.getElementById('m-cmsg').textContent=msg;document.getElementById('m-cok').textContent=btnLabel||'実行';document.getElementById('m-cok').onclick=fn;document.getElementById('m-confirm').classList.add('on');}
-function closeModal(id){document.getElementById(id).classList.remove('on');}
+function closeModal(id){
+  document.getElementById(id).classList.remove('on');
+  // 対局入力中に保留していた再描画をモーダルclose後に実行
+  if(id==='m-add-game'&&window._pendingRefreshAfterModal){
+    window._pendingRefreshAfterModal=false;
+    refreshCurrentTab();updateHdrBadge();
+  }
+}
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',function(e){if(e.target===this)closeModal(this.id);}));
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('on');setTimeout(()=>t.classList.remove('on'),2500);}
 // ══ CUSTOM NUMPAD ══
