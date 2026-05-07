@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260506-2346';
+const APP_VERSION = 'v14-20260507-0858';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -760,7 +760,18 @@ function loadApp(){
       recoverConsistency(data);
       syncSettingsUI();updateHdrBadge();setSyncStatus('synced','同期済み');go(currentTab||'home');
     } else {
-      if(_skipRemoteCount>0){_skipRemoteCount--;setSyncStatus('synced','同期済み');return;}
+      if(_skipRemoteCount>0){
+        _skipRemoteCount--;
+        // スキップ中でも Firebase が activeSession=null を返している場合は stale local state を修正
+        // （_skipRemoteCount ズレで mergeRemote がスキップされ続けた場合の安全弁）
+        if(data&&!data.activeSession&&A.activeSession){
+          console.warn('[sanma] skip中にactiveSession=nullを検出、stale stateをクリア',{skipRemoteCount:_skipRemoteCount});
+          A.activeSession=null;
+          clearAllChipPending();
+          updateHdrBadge();refreshCurrentTab();
+        }
+        setSyncStatus('synced','同期済み');return;
+      }
       if(data){
         // 入力中のチップ・スコアをDOMから確定
         const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();
@@ -859,11 +870,13 @@ function startSessionAtomic(newSess,onSuccess,onAbort){
   if(!fbDb||!fbReady)return;
   _skipRemoteCount++; // /activeSession transaction で1イベント
   fbDb.ref(FB_ACTIVE).transaction(cur=>{
+    console.warn('[startSessionAtomic] transaction cur:',cur!==null&&cur!==undefined?'exists(id='+cur?.id+')':'null',{_skipRemoteCount});
     if(cur!==null&&cur!==undefined)return; // 既に開始済み → アボート
     return newSess;
   },(err,committed)=>{
     if(err||!committed){
       if(_skipRemoteCount>0)_skipRemoteCount--;
+      console.warn('[startSessionAtomic] abort:',{err:err?.message,committed,_skipRemoteCount});
       if(onAbort)onAbort(committed===false?'already_exists':'error');
       return;
     }
@@ -1894,30 +1907,55 @@ function startSession(){
   const dtVal=document.getElementById('sess-start-dt').value;if(!dtVal){toast('開始日時を入力してください');return;}
   const newSess={id:Date.now().toString(),start:dtVal,players:[...sel],games:[],chips:{}};
   if(fbDb&&fbReady){
-    setModalLoading('m-start-sess',true,'開始中...');
-    startSessionAtomic(newSess,
-      ()=>{setModalLoading('m-start-sess',false);closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');},
-      (reason)=>{
-        setModalLoading('m-start-sess',false);
-        if(reason==='already_exists'){
-          toast('⚠ 他のユーザーがすでにセッションを開始しています');
-          closeModal('m-start-sess');
-          window._sessSelPlayers=[];
-          // _skipRemoteCount により他ユーザーのセッション受信イベントが飛ばされた可能性があるため
-          // activeSession を強制再取得してUIを最新状態に更新する
-          fbDb.ref(FB_ACTIVE).once('value',snap=>{
-            const sv=snap.val();
-            if(sv&&typeof sv==='object'){
-              A.activeSession=_normalizeActiveSession(sv);
-              updateHdrBadge();renderSession();
-              go('session');
-            }
-          });
-        } else {
-          toast('保存エラー');
-        }
+    setModalLoading('m-start-sess',true,'確認中...');
+    // ── ローカルの A.activeSession ではなく Firebase の実態を先に確認 ──
+    fbDb.ref(FB_ACTIVE).once('value',snap=>{
+      const firebaseActive=snap.val();
+      console.warn('[startSession] pre-check',{
+        localActiveSession:!!A.activeSession,
+        firebaseActiveSession:!!firebaseActive,
+        _skipRemoteCount
+      });
+      // stale local state を検出・修正
+      if(A.activeSession&&!firebaseActive){
+        console.warn('[startSession] stale local activeSession を検出、クリア');
+        A.activeSession=null;
+        clearAllChipPending();
+        updateHdrBadge();refreshCurrentTab();
       }
-    );
+      if(firebaseActive){
+        // Firebase にすでにセッションあり → ローカルを更新してセッション画面へ誘導
+        setModalLoading('m-start-sess',false);
+        A.activeSession=_normalizeActiveSession(firebaseActive);
+        updateHdrBadge();renderSession();
+        closeModal('m-start-sess');window._sessSelPlayers=[];
+        go('session');
+        toast('⚠ 他のユーザーがすでにセッションを開始しています');
+        return;
+      }
+      // Firebase に activeSession なし → 開始可能
+      setModalLoading('m-start-sess',true,'開始中...');
+      startSessionAtomic(newSess,
+        ()=>{setModalLoading('m-start-sess',false);closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');},
+        (reason)=>{
+          setModalLoading('m-start-sess',false);
+          if(reason==='already_exists'){
+            // pre-check と transaction の間に別ユーザーが開始したレアケース
+            toast('⚠ 他のユーザーがすでにセッションを開始しています');
+            closeModal('m-start-sess');window._sessSelPlayers=[];
+            fbDb.ref(FB_ACTIVE).once('value',snap2=>{
+              const sv=snap2.val();
+              if(sv&&typeof sv==='object'){A.activeSession=_normalizeActiveSession(sv);updateHdrBadge();renderSession();go('session');}
+            });
+          } else {
+            toast('保存エラー');
+          }
+        }
+      );
+    },err=>{
+      setModalLoading('m-start-sess',false);
+      toast('接続エラー: '+err.message);
+    });
   } else {
     A.activeSession=newSess;
     saveApp();closeModal('m-start-sess');window._sessSelPlayers=[];updateHdrBadge();renderSession();toast('セッションを開始しました');
