@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260507-1323';
+const APP_VERSION = 'v14-20260511-1527';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -931,8 +931,17 @@ function addGameAtomic(sessId,game,gameId,onSuccess,onAbort){
       return;
     }
     // snap.val() = /activeSession ノードのみ（root ではない）
-    if(snap&&snap.val()&&A.activeSession&&A.activeSession.id===sessId)
+    if(snap&&snap.val()&&A.activeSession&&A.activeSession.id===sessId){
       A.activeSession=_normalizeActiveSession(snap.val());
+      // addGame transaction snap にはチップが最新でない可能性がある
+      // _pendingChips の pid は DOM 入力値で上書きして他ユーザーのチップを消さない
+      if(Object.keys(_pendingChips).length){
+        Object.keys(_pendingChips).forEach(pid=>{
+          const chipEl=document.getElementById('chip-'+sessId+'-'+pid);
+          if(chipEl){const v=parseInt(chipEl.value);if(!isNaN(v))A.activeSession.chips[String(pid)]=v;}
+        });
+      }
+    }
     if(onSuccess)onSuccess();
   });
 }
@@ -1064,7 +1073,9 @@ function endSessionAtomic(sessId,sessData,onSuccess,onAbort){
       return[ga[0]||'',pd?pd.map(p=>Array.isArray(p)?p:_fbArr(p,[])):[]];
     });
     const svPlayers=_fbArr(serverActiveData.players,sessData.players||[]);
-    const sessToSave={...sessData,games:svGames,players:svPlayers};
+    // chips はサーバー確定値を優先（ローカル sessData.chips は古い可能性がある）
+    const svChips=serverActiveData.chips||{};
+    const sessToSave={...sessData,games:svGames,players:svPlayers,chips:svChips};
     const indexEntry={id:sessId,start:sessToSave.start||'',end:sessToSave.end||'',
       playerCount:svPlayers.length,gameCount:svGames.length};
     // completedSessionsById + index + state を一括 update()（1イベント）
@@ -1096,7 +1107,9 @@ function endSessionAtomic(sessId,sessData,onSuccess,onAbort){
 function updateChipsAtomic(pid,num,sessId){
   if(!fbDb||!fbReady)return;
   if(!A.activeSession||A.activeSession.id!==sessId)return; // ガード: セッション終了後は書かない
-  fbDb.ref(FB_PATH+'/activeSession/chips/'+String(pid)).set(num)
+  const writePath=FB_PATH+'/activeSession/chips/'+String(pid);
+  console.warn('[chip-write]',{pid,val:num,writePath,existingLocalChips:A.activeSession?.chips});
+  fbDb.ref(writePath).set(num)
     .then(()=>{delete _pendingChips[String(pid)];})    // 保存成功 → pending 解除
     .catch(()=>{delete _pendingChips[String(pid)];});  // 保存失敗 → pending 解除（次回 FB 値が正）
 }
