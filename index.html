@@ -469,7 +469,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260511-1527';
+const APP_VERSION = 'v14-20260608-1016';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -2021,11 +2021,9 @@ function openAddGame(){
   try{const saved=localStorage.getItem('sanma-scoremode');if(saved==='raw'||saved==='pts')scoreInputMode=saved;}catch(e){}
   document.getElementById('smb-pts')?.classList.toggle('on',scoreInputMode==='pts');
   document.getElementById('smb-raw')?.classList.toggle('on',scoreInputMode==='raw');
-  // チップ入力を強制保存（フォーカスが外れていない状態でも値を保持）
-  A.activeSession.players.forEach(pid=>{
-    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
-    if(el)chipBlur(pid,el.value);
-  });
+  // ナンパッドが開いていれば現在の入力を確定（自分の入力のみ保存）
+  // 全員分 chipBlur を呼ぶと他プレイヤーのチップを 0 で上書きするバグの原因になるため禁止
+  {const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();}
   // 参加者が3人の場合は全員を自動選択してスコア入力画面へ直接進む
   if(A.activeSession.players.length===3){
     sessGameSel=[...A.activeSession.players];
@@ -2282,16 +2280,11 @@ function setRemainder(pid){
 // ══ END SESSION ══
 function openEndSession(){
   if(!A.activeSession)return;
-  // モーダルを開く前に全チップ入力値をDOMから一括読み込み・保存
-  // （フォーカス中のまま終了ボタンを押した場合や、blurされていない入力にも対応）
+  // ナンパッドが開いていれば現在の入力を確定（自分の入力のみ保存）
+  // 全員分 DOM を読んで上書きすると他プレイヤーのチップを消すバグの原因になるため禁止
+  // A.activeSession.chips は mergeRemote で常に最新状態を保持している
+  {const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();}
   A.activeSession.chips=A.activeSession.chips||{};
-  A.activeSession.players.forEach(pid=>{
-    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
-    if(el){
-      const v=parseInt(el.value)||0;
-      A.activeSession.chips[String(pid)]=v;
-    }
-  });
   const now=new Date();
   document.getElementById('sess-end-dt').value=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
   document.getElementById('sess-note').value='';
@@ -2301,12 +2294,10 @@ function endSession(){
   if(!A.activeSession)return;
   const endDt=document.getElementById('sess-end-dt').value;
   if(!endDt){toast('終了日時を入力してください');return;}
-  // フォーカス中のチップ入力も含めてDOMから最新値を読み込み
+  // ナンパッドが開いていれば現在の入力を確定（自分の入力のみ保存）
+  // 全員分 DOM を読んで上書きすると他プレイヤーのチップを消すバグの原因になるため禁止
+  {const np=document.getElementById('numpad');if(np&&np.classList.contains('on'))kbOK();}
   A.activeSession.chips=A.activeSession.chips||{};
-  A.activeSession.players.forEach(pid=>{
-    const el=document.getElementById(`chip-${A.activeSession.id}-${pid}`);
-    if(el)A.activeSession.chips[String(pid)]=parseInt(el.value)||0;
-  });
   const chips=A.activeSession.chips;
   const chipSum=A.activeSession.players.reduce((a,pid)=>a+(parseInt(chips[String(pid)])||0),0);
   if(chipSum!==0){
