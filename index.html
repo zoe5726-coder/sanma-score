@@ -444,7 +444,21 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 <!-- ══ 場代清算 ══ -->
 <div class="overlay" id="m-baadai"><div class="modal">
   <div class="mtitle">💰 場代清算</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+  <!-- 全体時間行 -->
+  <div style="margin-bottom:10px">
+    <div style="font-size:10px;color:var(--sub);margin-bottom:4px;font-weight:600">全体時間</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <input type="datetime-local" id="bd-global-start"
+        style="flex:1;min-width:130px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:7px 9px;color:var(--tx);font-size:13px;outline:none"
+        onchange="onBaadaiTimeChange()">
+      <span style="font-size:12px;color:var(--sub)">〜</span>
+      <input type="datetime-local" id="bd-global-end"
+        style="flex:1;min-width:130px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:7px 9px;color:var(--tx);font-size:13px;outline:none"
+        onchange="onBaadaiTimeChange()">
+    </div>
+  </div>
+  <!-- ゲーム代・倍率行 -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
     <div>
       <div style="font-size:10px;color:var(--sub);margin-bottom:4px;font-weight:600">全体のゲーム代（円）</div>
       <input type="number" id="bd-fee-input" placeholder="例: 3000" min="0"
@@ -453,10 +467,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     </div>
     <div>
       <div style="font-size:10px;color:var(--sub);margin-bottom:4px;font-weight:600">1P 当たりの倍率（円）</div>
-      <input type="number" id="bd-rate-input" placeholder="例: 10" min="0"
+      <input type="number" id="bd-rate-input" placeholder="例: 25" min="0"
         style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font-size:14px;outline:none"
         oninput="calcBaadai()">
     </div>
+  </div>
+  <!-- 一括設定行 -->
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+    <div style="font-size:10px;color:var(--sub);font-weight:600;white-space:nowrap">一括設定</div>
+    <input type="number" id="bd-bulk-time" placeholder="分" min="0"
+      style="width:80px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:7px 9px;color:var(--tx);font-size:13px;outline:none">
+    <button class="btn btn-s" onclick="applyBaadaiBulk()" style="font-size:12px;padding:6px 10px">全員に適用</button>
   </div>
   <div style="font-size:10px;color:var(--sub);margin-bottom:6px">
     ※ スコア = 対局スコア＋チップ合計　　場代 = ゲーム代を滞在時間で按分　　合計 = 換算 − 場代
@@ -494,7 +515,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260610-1934';
+const APP_VERSION = 'v14-20260611-0013';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -3155,26 +3176,60 @@ function openBaadai(sessId){
   if(!sess)return;
   _baadaiSessId=sessId;
 
-  // 初期滞在時間: セッション開始〜終了（または現在）の分数
+  // 全体開始・終了時刻
   const startMs=new Date(sess.start).getTime();
   const endMs=sess.end?new Date(sess.end).getTime():Date.now();
-  const durationMin=Math.max(1,Math.round((endMs-startMs)/60000));
+
+  // datetime-local フォーマット変換ヘルパー
+  function toLocalDt(ms){
+    return new Date(ms-new Date(ms).getTimezoneOffset()*60000).toISOString().slice(0,16);
+  }
+  // HH:MM 変換ヘルパー
+  function msToTime(ms){
+    const d=new Date(ms);
+    return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+  }
+
+  // 初期滞在時間: 15分単位切り捨て（15分未満は0）
+  const rawMin=Math.floor((endMs-startMs)/60000);
+  const durationMin=Math.floor(rawMin/15)*15;
+
+  // 全体時間入力に初期値をセット
+  document.getElementById('bd-global-start').value=toLocalDt(startMs);
+  document.getElementById('bd-global-end').value=toLocalDt(endMs);
 
   const players=sess.players.map(pid=>playerById(pid));
 
-  // テーブル行（プレイヤーごと）
+  // テーブル行（プレイヤーごと）＋補助行
   const rows=players.map(p=>`
-  <tr>
+  <tr id="bd-row-${p.id}">
     <td style="padding:6px 4px;font-size:13px;font-weight:600;color:${p.color};white-space:nowrap">${esc(p.name)}</td>
     <td id="bd-score-${p.id}" style="text-align:right;padding:6px 4px;font-size:13px">-</td>
     <td id="bd-conv-${p.id}"  style="text-align:right;padding:6px 4px;font-size:13px">-</td>
-    <td style="text-align:center;padding:4px 2px">
+    <td style="text-align:center;padding:4px 2px;white-space:nowrap">
       <input type="number" id="bd-time-${p.id}" value="${durationMin}" min="0"
-        style="width:58px;text-align:center;background:var(--sf2);border:1px solid var(--bd);border-radius:6px;padding:4px 3px;color:var(--tx);font-size:13px;outline:none"
+        style="width:54px;text-align:center;background:var(--sf2);border:1px solid var(--bd);border-radius:6px;padding:4px 3px;color:var(--tx);font-size:13px;outline:none"
         oninput="calcBaadai()">
+      <button onclick="toggleBaadaiHelper('${p.id}')"
+        style="margin-left:2px;background:none;border:1px solid var(--bd);border-radius:5px;color:var(--sub);font-size:11px;padding:2px 5px;cursor:pointer">⏱</button>
     </td>
     <td id="bd-fee-${p.id}"   style="text-align:right;padding:6px 4px;font-size:13px;color:var(--sub)">-</td>
     <td id="bd-tot-${p.id}"   style="text-align:right;padding:6px 4px;font-size:13px;font-weight:700">-</td>
+  </tr>
+  <tr id="bd-helper-${p.id}" style="display:none;background:var(--sf2)">
+    <td colspan="6" style="padding:6px 8px">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--sub)">開始</span>
+        <input type="time" id="bd-hstart-${p.id}"
+          style="background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:13px;outline:none">
+        <span style="font-size:11px;color:var(--sub)">〜 終了</span>
+        <input type="time" id="bd-hend-${p.id}"
+          style="background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:3px 6px;color:var(--tx);font-size:13px;outline:none">
+        <button onclick="calcBaadaiPlayerTime('${p.id}')"
+          style="background:var(--ac);border:none;border-radius:6px;color:#fff;font-size:11px;padding:4px 8px;cursor:pointer">適用</button>
+        <span id="bd-hresult-${p.id}" style="font-size:11px;color:var(--sub)"></span>
+      </div>
+    </td>
   </tr>`).join('');
 
   document.getElementById('bd-table-wrap').innerHTML=`
@@ -3194,9 +3249,17 @@ function openBaadai(sessId){
   </table>
   </div>`;
 
+  // 補助行の初期時刻をセッション開始・終了に合わせる
+  players.forEach(p=>{
+    const hstart=document.getElementById('bd-hstart-'+p.id);
+    const hend=document.getElementById('bd-hend-'+p.id);
+    if(hstart)hstart.value=msToTime(startMs);
+    if(hend)hend.value=msToTime(endMs);
+  });
+
   document.getElementById('bd-fee-input').value='';
-  document.getElementById('bd-rate-input').value='';
-  calcBaadai(); // スコア列だけ先に描画
+  document.getElementById('bd-rate-input').value='25';
+  calcBaadai();
   document.getElementById('m-baadai').classList.add('on');
 }
 
@@ -3260,6 +3323,89 @@ function calcBaadai(){
       totEl.style.color=tot!==null&&tot>=0?'var(--ac)':tot!==null?'var(--red)':'var(--tx)';
     }
   });
+}
+
+// 場代清算 補助行トグル（1つだけ開く）
+function toggleBaadaiHelper(pid){
+  const row=document.getElementById('bd-helper-'+pid);
+  if(!row)return;
+  const isOpen=row.style.display!=='none';
+  // 他の補助行を全て閉じる
+  const sess=A.activeSession&&A.activeSession.id===_baadaiSessId
+    ?A.activeSession
+    :A.completedSessions.find(s=>s&&s.id===_baadaiSessId);
+  if(sess){
+    sess.players.forEach(p=>{
+      const r=document.getElementById('bd-helper-'+p);
+      if(r)r.style.display='none';
+    });
+  }
+  if(!isOpen)row.style.display='';
+}
+
+// 場代清算 補助行: 開始〜終了時刻から滞在分数を計算して反映
+function calcBaadaiPlayerTime(pid){
+  const startEl=document.getElementById('bd-hstart-'+pid);
+  const endEl=document.getElementById('bd-hend-'+pid);
+  const resultEl=document.getElementById('bd-hresult-'+pid);
+  if(!startEl||!endEl)return;
+  const [sh,sm]=(startEl.value||'00:00').split(':').map(Number);
+  const [eh,em]=(endEl.value||'00:00').split(':').map(Number);
+  let startTotalMin=sh*60+sm;
+  let endTotalMin=eh*60+em;
+  if(endTotalMin<startTotalMin)endTotalMin+=24*60; // 日をまたぐ場合
+  const rawMin=endTotalMin-startTotalMin;
+  const floorMin=Math.floor(rawMin/15)*15;
+  const timeEl=document.getElementById('bd-time-'+pid);
+  if(timeEl)timeEl.value=floorMin;
+  if(resultEl)resultEl.textContent='→ '+floorMin+'分';
+  calcBaadai();
+}
+
+// 場代清算 全体時間変更時: 全プレイヤーの滞在時間をリセット
+function onBaadaiTimeChange(){
+  const startEl=document.getElementById('bd-global-start');
+  const endEl=document.getElementById('bd-global-end');
+  if(!startEl||!endEl)return;
+  const startMs=startEl.value?new Date(startEl.value).getTime():0;
+  const endMs=endEl.value?new Date(endEl.value).getTime():0;
+  if(startMs<=0||endMs<=startMs)return;
+  const rawMin=Math.floor((endMs-startMs)/60000);
+  const floorMin=Math.floor(rawMin/15)*15;
+  function msToTime(ms){
+    const d=new Date(ms);
+    return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+  }
+  const sess=A.activeSession&&A.activeSession.id===_baadaiSessId
+    ?A.activeSession
+    :A.completedSessions.find(s=>s&&s.id===_baadaiSessId);
+  if(!sess)return;
+  sess.players.forEach(p=>{
+    const el=document.getElementById('bd-time-'+p);
+    if(el)el.value=floorMin;
+    const hstart=document.getElementById('bd-hstart-'+p);
+    const hend=document.getElementById('bd-hend-'+p);
+    if(hstart)hstart.value=msToTime(startMs);
+    if(hend)hend.value=msToTime(endMs);
+  });
+  calcBaadai();
+}
+
+// 場代清算 一括設定: 全プレイヤーの滞在時間を同じ値に設定（15分切り捨て）
+function applyBaadaiBulk(){
+  const bulkEl=document.getElementById('bd-bulk-time');
+  if(!bulkEl)return;
+  const rawVal=parseInt(bulkEl.value)||0;
+  const floorVal=Math.floor(rawVal/15)*15;
+  const sess=A.activeSession&&A.activeSession.id===_baadaiSessId
+    ?A.activeSession
+    :A.completedSessions.find(s=>s&&s.id===_baadaiSessId);
+  if(!sess)return;
+  sess.players.forEach(p=>{
+    const el=document.getElementById('bd-time-'+p);
+    if(el)el.value=floorVal;
+  });
+  calcBaadai();
 }
 
 // ══ EXCEL BACKUP (全対局データ) ══
