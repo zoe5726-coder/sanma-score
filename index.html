@@ -515,7 +515,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260611-0013';
+const APP_VERSION = 'v14-20260611-1403';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -3297,7 +3297,7 @@ function calcBaadai(){
     const sc=st[p.id].total;
     const conv=hasRate?Math.round(sc*rate):null;
     const ownTime=Math.max(0,parseInt(document.getElementById('bd-time-'+p.id)?.value)||0);
-    const fee=hasFee&&totalTime>0?Math.round(totalFee*ownTime/totalTime):null;
+    const fee=hasFee&&totalTime>0?Math.ceil(totalFee*ownTime/totalTime/50)*50:null;
     // 合計 = スコア換算 - 場代（プラスなら受け取り、マイナスなら支払い）
     const tot=(conv!==null&&fee!==null)?conv-fee:null;
 
