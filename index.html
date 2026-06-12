@@ -518,7 +518,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260611-1947';
+const APP_VERSION = 'v14-20260612-1159';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1916,7 +1916,7 @@ function renderActiveSession(el){
     <button class="btn btn-s" onclick="openAddMember()" style="font-size:13px">👤＋ 参加者を追加</button>
   </div>
   <div style="margin-bottom:10px">
-    <button class="btn btn-s" onclick="openBaadai('${s.id}')" style="font-size:13px;width:100%">💰 ゲーム代清算</button>
+    <button class="btn btn-s" onclick="openBaadai('${s.id}')" style="font-size:13px;width:100%">💰 清算</button>
   </div>`;
   setTimeout(initStickyHeader,120);
 }
@@ -2403,7 +2403,7 @@ function openSessDetail(id){
   document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true,firstColW:detailFirstColW})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
-  const baadaiBtn=`<button class="btn btn-s bsm" onclick="closeModal('m-sess-detail');openBaadai('${id}')">💰 ゲーム代清算</button>`;
+  const baadaiBtn=`<button class="btn btn-s bsm" onclick="closeModal('m-sess-detail');openBaadai('${id}')">💰 清算</button>`;
   if(isAdmin()){actEl.innerHTML=`${shareBtn}${baadaiBtn}<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button><button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
   else{actEl.innerHTML=`${shareBtn}${baadaiBtn}`;}
   document.getElementById('m-sess-detail').classList.add('on');
@@ -3171,9 +3171,23 @@ function saveEditSessMeta(){
 
 // ══ 場代清算 ══
 let _baadaiSessId=null; // 現在開いている場代清算のセッションID
-// 手動変更した全体開始・終了時刻をセッションIDごとに記録（ms）
-// { [sessId]: { start: ms|null, end: ms|null } }
+// 清算設定をセッションIDごとに記録（localStorage + メモリ）
+// { [sessId]: { start: ms|null, end: ms|null, times: { [pid]: minutes } } }
 let _baadaiOverrides={};
+
+function _saveBaadaiState(){
+  if(!_baadaiSessId)return;
+  try{localStorage.setItem('baadai_'+_baadaiSessId,JSON.stringify(_baadaiOverrides[_baadaiSessId]||{}));}catch(e){}
+}
+
+function _loadBaadaiState(sessId){
+  try{
+    const raw=localStorage.getItem('baadai_'+sessId);
+    if(raw)_baadaiOverrides[sessId]=JSON.parse(raw);
+  }catch(e){}
+  if(!_baadaiOverrides[sessId])_baadaiOverrides[sessId]={start:null,end:null,times:{}};
+  if(!_baadaiOverrides[sessId].times)_baadaiOverrides[sessId].times={};
+}
 
 function openBaadai(sessId){
   const sess=A.activeSession&&A.activeSession.id===sessId
@@ -3182,8 +3196,8 @@ function openBaadai(sessId){
   if(!sess)return;
   _baadaiSessId=sessId;
 
-  // 手動上書きがあればそれを使い、なければセッション時刻（進行中は開いた瞬間の現在時刻）
-  if(!_baadaiOverrides[sessId])_baadaiOverrides[sessId]={start:null,end:null};
+  // localStorageから前回の設定を復元（なければ初期化）
+  _loadBaadaiState(sessId);
   const ov=_baadaiOverrides[sessId];
   const startMs=ov.start!==null?ov.start:new Date(sess.start).getTime();
   const endMs=ov.end!==null?ov.end:(sess.end?new Date(sess.end).getTime():Date.now());
@@ -3265,6 +3279,15 @@ function openBaadai(sessId){
     if(hend)hend.value=msToTime(endMs);
   });
 
+  // 保存済みの各プレイヤー滞在時間があれば復元（なければ初期計算値のまま）
+  players.forEach(p=>{
+    const saved=ov.times&&ov.times[String(p.id)]!==undefined?ov.times[String(p.id)]:null;
+    if(saved!==null){
+      const el=document.getElementById('bd-time-'+p.id);
+      if(el)el.value=saved;
+    }
+  });
+
   document.getElementById('bd-fee-input').value='';
   document.getElementById('bd-rate-input').value='25';
   _updateBaadaiLockUI();
@@ -3332,6 +3355,17 @@ function calcBaadai(){
       totEl.style.color=tot!==null&&tot>=0?'var(--ac)':tot!==null?'var(--red)':'var(--tx)';
     }
   });
+
+  // 各プレイヤーの現在の滞在時間をoverride + localStorageに保存
+  if(sessId){
+    if(!_baadaiOverrides[sessId])_baadaiOverrides[sessId]={start:null,end:null,times:{}};
+    if(!_baadaiOverrides[sessId].times)_baadaiOverrides[sessId].times={};
+    players.forEach(p=>{
+      const t=parseInt(document.getElementById('bd-time-'+p.id)?.value)||0;
+      _baadaiOverrides[sessId].times[String(p.id)]=Math.max(0,t);
+    });
+    _saveBaadaiState();
+  }
 }
 
 // 場代清算 補助行トグル（1つだけ開く）
@@ -3414,6 +3448,7 @@ function _applyBaadaiGlobalTime(startMs,endMs){
 function resetBaadaiTime(){
   if(!_baadaiSessId)return;
   delete _baadaiOverrides[_baadaiSessId];
+  try{localStorage.removeItem('baadai_'+_baadaiSessId);}catch(e){}
   const sess=A.activeSession&&A.activeSession.id===_baadaiSessId
     ?A.activeSession
     :A.completedSessions.find(s=>s&&s.id===_baadaiSessId);
