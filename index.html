@@ -443,10 +443,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div></div>
 <!-- ══ 場代清算 ══ -->
 <div class="overlay" id="m-baadai"><div class="modal">
-  <div class="mtitle">💰 場代清算</div>
+  <div class="mtitle">💰 ゲーム代清算</div>
   <!-- 全体時間行 -->
   <div style="margin-bottom:10px">
-    <div style="font-size:10px;color:var(--sub);margin-bottom:4px;font-weight:600">全体時間</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <span style="font-size:10px;color:var(--sub);font-weight:600">全体時間 <span id="bd-time-locked" style="display:none;color:var(--ac)">🔒 手動設定中</span></span>
+      <button onclick="resetBaadaiTime()" style="background:none;border:none;font-size:11px;color:var(--sub);cursor:pointer;padding:0 2px;text-decoration:underline">リセット</button>
+    </div>
     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
       <input type="datetime-local" id="bd-global-start"
         style="flex:1;min-width:130px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:7px 9px;color:var(--tx);font-size:13px;outline:none"
@@ -480,7 +483,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button class="btn btn-s" onclick="applyBaadaiBulk()" style="font-size:12px;padding:6px 10px">全員に適用</button>
   </div>
   <div style="font-size:10px;color:var(--sub);margin-bottom:6px">
-    ※ スコア = 対局スコア＋チップ合計　　場代 = ゲーム代を滞在時間で按分　　合計 = 換算 − 場代
+    ※ スコア = 対局スコア＋チップ合計　　ゲーム代 = 全体ゲーム代を滞在時間で按分　　合計 = 換算 − ゲーム代
   </div>
   <div id="bd-table-wrap"></div>
   <div style="margin-top:12px">
@@ -515,7 +518,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260611-1403';
+const APP_VERSION = 'v14-20260611-1947';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1913,7 +1916,7 @@ function renderActiveSession(el){
     <button class="btn btn-s" onclick="openAddMember()" style="font-size:13px">👤＋ 参加者を追加</button>
   </div>
   <div style="margin-bottom:10px">
-    <button class="btn btn-s" onclick="openBaadai('${s.id}')" style="font-size:13px;width:100%">💰 場代清算</button>
+    <button class="btn btn-s" onclick="openBaadai('${s.id}')" style="font-size:13px;width:100%">💰 ゲーム代清算</button>
   </div>`;
   setTimeout(initStickyHeader,120);
 }
@@ -2400,7 +2403,7 @@ function openSessDetail(id){
   document.getElementById('m-sess-detail-body').innerHTML=`<div class="score-tbl-wrap" style="margin:0 -4px">${buildSessionStats(s,{noWrap:true,firstColW:detailFirstColW})}${buildScoreTable(s,editOpts)}</div>`+(s.note?`<div style="margin-top:8px;font-size:12px;color:var(--sub)">📝 ${esc(s.note)}</div>`:'');
   const actEl=document.getElementById('m-sess-detail-actions');
   const shareBtn=`<button class="btn btn-p bsm" onclick="shareSession('${id}')">📸 共有</button>`;
-  const baadaiBtn=`<button class="btn btn-s bsm" onclick="closeModal('m-sess-detail');openBaadai('${id}')">💰 場代清算</button>`;
+  const baadaiBtn=`<button class="btn btn-s bsm" onclick="closeModal('m-sess-detail');openBaadai('${id}')">💰 ゲーム代清算</button>`;
   if(isAdmin()){actEl.innerHTML=`${shareBtn}${baadaiBtn}<button class="btn btn-o bsm" onclick="resumeSession('${id}')">▶ 再開</button><button class="btn btn-s bsm" onclick="openEditSessMeta('${id}')">✏️ 編集</button><button class="btn btn-d bsm" onclick="adminDeleteSession('${id}')">🗑 削除</button>`;}
   else{actEl.innerHTML=`${shareBtn}${baadaiBtn}`;}
   document.getElementById('m-sess-detail').classList.add('on');
@@ -3168,6 +3171,9 @@ function saveEditSessMeta(){
 
 // ══ 場代清算 ══
 let _baadaiSessId=null; // 現在開いている場代清算のセッションID
+// 手動変更した全体開始・終了時刻をセッションIDごとに記録（ms）
+// { [sessId]: { start: ms|null, end: ms|null } }
+let _baadaiOverrides={};
 
 function openBaadai(sessId){
   const sess=A.activeSession&&A.activeSession.id===sessId
@@ -3176,9 +3182,11 @@ function openBaadai(sessId){
   if(!sess)return;
   _baadaiSessId=sessId;
 
-  // 全体開始・終了時刻
-  const startMs=new Date(sess.start).getTime();
-  const endMs=sess.end?new Date(sess.end).getTime():Date.now();
+  // 手動上書きがあればそれを使い、なければセッション時刻（進行中は開いた瞬間の現在時刻）
+  if(!_baadaiOverrides[sessId])_baadaiOverrides[sessId]={start:null,end:null};
+  const ov=_baadaiOverrides[sessId];
+  const startMs=ov.start!==null?ov.start:new Date(sess.start).getTime();
+  const endMs=ov.end!==null?ov.end:(sess.end?new Date(sess.end).getTime():Date.now());
 
   // datetime-local フォーマット変換ヘルパー
   function toLocalDt(ms){
@@ -3241,7 +3249,7 @@ function openBaadai(sessId){
         <th style="text-align:right;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">スコア</th>
         <th style="text-align:right;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">換算(円)</th>
         <th style="text-align:center;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">滞在(分)</th>
-        <th style="text-align:right;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">場代(円)</th>
+        <th style="text-align:right;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">ゲーム代(円)</th>
         <th style="text-align:right;padding:5px 4px;font-size:10px;color:var(--sub);font-weight:600">合計(円)</th>
       </tr>
     </thead>
@@ -3259,6 +3267,7 @@ function openBaadai(sessId){
 
   document.getElementById('bd-fee-input').value='';
   document.getElementById('bd-rate-input').value='25';
+  _updateBaadaiLockUI();
   calcBaadai();
   document.getElementById('m-baadai').classList.add('on');
 }
@@ -3362,13 +3371,23 @@ function calcBaadaiPlayerTime(pid){
   calcBaadai();
 }
 
-// 場代清算 全体時間変更時: 全プレイヤーの滞在時間をリセット
+// 場代清算 全体時間変更時: overrideに記録してから全プレイヤーの滞在時間を更新
 function onBaadaiTimeChange(){
   const startEl=document.getElementById('bd-global-start');
   const endEl=document.getElementById('bd-global-end');
   if(!startEl||!endEl)return;
   const startMs=startEl.value?new Date(startEl.value).getTime():0;
   const endMs=endEl.value?new Date(endEl.value).getTime():0;
+  // 手動変更を記録（固定）
+  if(!_baadaiOverrides[_baadaiSessId])_baadaiOverrides[_baadaiSessId]={start:null,end:null};
+  if(startMs>0)_baadaiOverrides[_baadaiSessId].start=startMs;
+  if(endMs>0)_baadaiOverrides[_baadaiSessId].end=endMs;
+  _updateBaadaiLockUI();
+  _applyBaadaiGlobalTime(startMs,endMs);
+}
+
+// 場代清算 全体時間を全プレイヤーの滞在時間・補助行に反映（override保存なし）
+function _applyBaadaiGlobalTime(startMs,endMs){
   if(startMs<=0||endMs<=startMs)return;
   const rawMin=Math.floor((endMs-startMs)/60000);
   const floorMin=Math.floor(rawMin/15)*15;
@@ -3389,6 +3408,34 @@ function onBaadaiTimeChange(){
     if(hend)hend.value=msToTime(endMs);
   });
   calcBaadai();
+}
+
+// 場代清算 リセット: overrideを消してセッション本来の時刻に戻す
+function resetBaadaiTime(){
+  if(!_baadaiSessId)return;
+  delete _baadaiOverrides[_baadaiSessId];
+  const sess=A.activeSession&&A.activeSession.id===_baadaiSessId
+    ?A.activeSession
+    :A.completedSessions.find(s=>s&&s.id===_baadaiSessId);
+  if(!sess)return;
+  const startMs=new Date(sess.start).getTime();
+  const endMs=sess.end?new Date(sess.end).getTime():Date.now();
+  function toLocalDt(ms){
+    return new Date(ms-new Date(ms).getTimezoneOffset()*60000).toISOString().slice(0,16);
+  }
+  document.getElementById('bd-global-start').value=toLocalDt(startMs);
+  document.getElementById('bd-global-end').value=toLocalDt(endMs);
+  _updateBaadaiLockUI();
+  _applyBaadaiGlobalTime(startMs,endMs);
+}
+
+// 場代清算 ロックUIの表示更新
+function _updateBaadaiLockUI(){
+  const el=document.getElementById('bd-time-locked');
+  if(!el)return;
+  const ov=_baadaiOverrides[_baadaiSessId];
+  const hasLock=ov&&(ov.start!==null||ov.end!==null);
+  el.style.display=hasLock?'':'none';
 }
 
 // 場代清算 一括設定: 全プレイヤーの滞在時間を同じ値に設定（15分切り捨て）
