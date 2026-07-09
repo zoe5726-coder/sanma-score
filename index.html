@@ -518,7 +518,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260612-1159';
+const APP_VERSION = 'v14-20260709-1447';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1735,7 +1735,7 @@ function buildScoreTable(session,opts={}){
   const players=session.players.map(pid=>playerById(pid));const games=session.games;const chips=session.chips||{};
   const editable=opts.editable||false;const editSessId=opts.editSessId||session.id;
   const chipReadOnly=opts.chipReadOnly||false;
-  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=(isActive&&!chipReadOnly)||(editable&&isAdmin());
+  const isActive=!session.end;const showEditBtns=isActive||(editable&&isAdmin());const showChipInput=isActive&&!chipReadOnly;
   const ptTot={};players.forEach(p=>{ptTot[p.id]=0;});
   games.forEach(g=>{if(!Array.isArray(g[1]))return;g[1].forEach(([pid,pts])=>{if(ptTot[pid]!==undefined)ptTot[pid]+=pts;});});
   const firstColPx=showEditBtns?72:60;const minW=Math.max(280,firstColPx+players.length*70);
