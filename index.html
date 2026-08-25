@@ -562,7 +562,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260820-1802';
+const APP_VERSION = 'v14-20260825-1136';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1473,8 +1473,12 @@ function calcRatings(opts={}){
       }
     }
     let maxMove=0;
+    const LAMBDA=60; // ベイズ正則化: レート1500の仮想相手と互角のペア対戦60回分（30局相当）
     for(const p in R){
-      const move=300*(sum[p]||0)/(cnt[p]||1); // 減衰係数300（安定収束）
+      const E0=1/(1+Math.pow(10,(1500-R[p])/400));
+      const s=(sum[p]||0)+LAMBDA*(0.5-E0);
+      const c=(cnt[p]||0)+LAMBDA;
+      const move=300*s/c; // 減衰係数300（安定収束）
       R[p]+=move;
       if(Math.abs(move)>maxMove)maxMove=Math.abs(move);
     }
@@ -1516,40 +1520,48 @@ function renderRatingTable(){
   const regular=entries.filter(e=>e.n>=RATING_MIN_GAMES);
   const prov=entries.filter(e=>e.n<RATING_MIN_GAMES);
   const mkRow=(e,i,isProv)=>{
-    const p=playerById(e.pid);const s=st[e.pid]||{avgRank:0,r1r:0,r2r:0,r3r:0};
+    const p=playerById(e.pid);const s=st[e.pid]||{avgRank:0,r1:0,r2:0,r3:0};
     const[te,tn]=ratingTier(e.rate);
-    const bar=`<div style="display:flex;height:13px;border-radius:4px;overflow:hidden;min-width:84px">
-      <div style="width:${(s.r1r*100).toFixed(1)}%;background:var(--gold)"></div>
-      <div style="width:${(s.r2r*100).toFixed(1)}%;background:var(--slv)"></div>
-      <div style="width:${(s.r3r*100).toFixed(1)}%;background:var(--brz)"></div>
-    </div><div style="font-size:8px;color:var(--sub);margin-top:1px;text-align:center">${(s.r1r*100).toFixed(0)}·${(s.r2r*100).toFixed(0)}·${(s.r3r*100).toFixed(0)}%</div>`;
-    return`<tr${isProv?' style="opacity:.55"':''}>
-      <td style="text-align:center;font-weight:700;font-size:11px">${isProv?'-':i+1}</td>
-      <td><div class="pname-cell"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div><div style="font-size:9px;color:var(--sub);white-space:nowrap">${te} ${tn}${isProv?'（暫定）':''}</div></td>
-      <td style="text-align:right;font-weight:700;font-size:14px">${e.rate}</td>
-      <td style="text-align:right;font-size:11px">${e.n}</td>
-      <td style="text-align:right;font-size:11px">${s.avgRank?s.avgRank.toFixed(3):'-'}</td>
-      <td style="padding:3px 4px">${bar}</td>
+    // バーの分母は順位が付いた対局数（合計が常に100%になる）
+    const rkTot=(s.r1||0)+(s.r2||0)+(s.r3||0);
+    const w1=rkTot>0?(s.r1/rkTot*100):0,w2=rkTot>0?(s.r2/rkTot*100):0,w3=rkTot>0?(s.r3/rkTot*100):0;
+    const bar=`<div style="display:flex;height:12px;border-radius:4px;overflow:hidden;width:100%;background:var(--sf2)">
+      <div style="width:${w1.toFixed(1)}%;background:var(--gold)"></div>
+      <div style="width:${w2.toFixed(1)}%;background:var(--slv)"></div>
+      <div style="width:${w3.toFixed(1)}%;background:var(--brz)"></div>
+    </div><div style="font-size:8px;color:var(--sub);margin-top:1px;text-align:center;white-space:nowrap">${w1.toFixed(0)}·${w2.toFixed(0)}·${w3.toFixed(0)}%</div>`;
+    const dim=isProv?'color:var(--sub)':'';
+    return`<tr>
+      <td style="text-align:center;font-weight:700;font-size:11px;${dim}">${isProv?'-':i+1}</td>
+      <td style="overflow:hidden"><div class="pname-cell" style="${dim}"><div class="pdot" style="background:${p.color}"></div><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span></div><div style="font-size:9px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${te} ${tn}${isProv?'（暫定）':''}</div></td>
+      <td style="text-align:right;font-weight:700;font-size:13px;${dim}">${e.rate}</td>
+      <td style="text-align:right;font-size:11px;${dim}">${e.n}</td>
+      <td style="text-align:right;font-size:11px;${dim}">${s.avgRank?s.avgRank.toFixed(3):'-'}</td>
+      <td style="padding:3px 4px 3px 6px">${bar}</td>
     </tr>`;
   };
-  let html=`<div class="card" style="padding:10px 0;overflow:hidden">
+  // 正規と暫定を1つのテーブルに統合（列幅を完全に揃える）
+  const colgroup=`<colgroup>
+    <col style="width:24px"><col><col style="width:46px"><col style="width:38px"><col style="width:46px"><col style="width:76px">
+  </colgroup>`;
+  let bodyHtml=regular.map((e,i)=>mkRow(e,i,false)).join('');
+  if(prov.length){
+    bodyHtml+=`<tr><td colspan="6" style="font-size:10px;color:var(--sub);text-align:left;padding:8px 6px 4px;background:var(--sf2)">▼ 暫定（${RATING_MIN_GAMES}局未満）</td></tr>`;
+    bodyHtml+=prov.map((e,i)=>mkRow(e,i,true)).join('');
+  }
+  el.innerHTML=`<div class="card" style="padding:10px 0;overflow:hidden">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:0 12px 8px">
       <div style="font-size:12px;font-weight:700">🏅 レーティング</div>
       <button onclick="document.getElementById('m-rating-help').classList.add('on')" style="background:var(--sf2);border:1px solid var(--bd);border-radius:50%;width:22px;height:22px;color:var(--sub);font-size:12px;cursor:pointer;line-height:1">?</button>
     </div>
-    <div style="overflow-x:auto">
-    <table class="tbl2" style="min-width:340px">
+    <table class="tbl2">
+      ${colgroup}
       <thead><tr>
-        <th style="width:26px">#</th><th style="text-align:left">名前</th><th style="text-align:right">レート</th><th style="text-align:right">局数</th><th style="text-align:right">平均着順</th><th style="text-align:center">着順分布</th>
+        <th style="width:24px">#</th><th style="text-align:left">名前</th><th style="text-align:right">レート</th><th style="text-align:right">局数</th><th style="text-align:right">平均<br>着順</th><th style="text-align:center">着順分布</th>
       </tr></thead>
-      <tbody>${regular.map((e,i)=>mkRow(e,i,false)).join('')}</tbody>
-    </table>`;
-  if(prov.length){
-    html+=`<div style="font-size:10px;color:var(--sub);padding:8px 12px 4px">▼ 暫定（${RATING_MIN_GAMES}局未満）</div>
-    <table class="tbl2" style="min-width:340px"><tbody>${prov.map((e,i)=>mkRow(e,i,true)).join('')}</tbody></table>`;
-  }
-  html+=`</div></div>`;
-  el.innerHTML=html;
+      <tbody>${bodyHtml}</tbody>
+    </table>
+  </div>`;
 }
 
 // ══ STATS TABLE ══
