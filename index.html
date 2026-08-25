@@ -515,7 +515,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <p style="margin-bottom:10px">毎回、対象期間の全対局を最初から計算し直します。あとから対局が追加・修正されても常に全履歴を反映した正確な値になり、「最近の成績だけ偏って反映される」こともありません。</p>
     <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--ac)">称号と目安</div>
     <div style="font-size:11px;line-height:1.8;background:var(--sf2);border-radius:8px;padding:8px 10px;margin-bottom:10px">
-      🐉 <b>雀神（1750〜）</b> 平均+4.5P以上を維持する伝説の域。まだ誰も到達していない<br>
+      🌠 <b>麻雀の化身（2000〜）</b> 平均+12.5P超。もはや人間ではない。目撃したら拝むこと<br>
+      🪐 <b>宇宙の意思（1950〜）</b> 平均+11P前後。牌が向こうから寄ってくる領域<br>
+      🌌 <b>銀河雀士（1900〜）</b> 平均+10P前後。会の歴史に語り継がれる爆勝ぶり<br>
+      ☄️ <b>雀仙（1850〜）</b> 平均+8.5P前後。仙人の域。下界の麻雀とは別物<br>
+      👑 <b>雀帝（1800〜）</b> 平均+7.5P前後。月間王者クラスの絶好調<br>
+      🐉 <b>雀神（1750〜）</b> 平均+6P以上。神がかった月に到達できる<br>
       ⚡ <b>雀聖（1700〜）</b> 強豪相手に平均+3.5P前後を稼ぎ続ける会のトップ<br>
       🔥 <b>雀豪（1650〜）</b> 平均+1.5〜3P・トップ率34%以上。強い卓で安定して勝ち越す実力者<br>
       💎 <b>雀傑（1600〜）</b> 平均±0〜+1.5P。強い相手と打って崩れない<br>
@@ -562,7 +567,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260825-1136';
+const APP_VERSION = 'v14-20260825-1144';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1493,6 +1498,11 @@ function calcRatings(opts={}){
 }
 // レート称号
 function ratingTier(r){
+  if(r>=2000)return['🌠','麻雀の化身'];
+  if(r>=1950)return['🪐','宇宙の意思'];
+  if(r>=1900)return['🌌','銀河雀士'];
+  if(r>=1850)return['☄️','雀仙'];
+  if(r>=1800)return['👑','雀帝'];
   if(r>=1750)return['🐉','雀神'];
   if(r>=1700)return['⚡','雀聖'];
   if(r>=1650)return['🔥','雀豪'];
@@ -1533,7 +1543,7 @@ function renderRatingTable(){
     const dim=isProv?'color:var(--sub)':'';
     return`<tr>
       <td style="text-align:center;font-weight:700;font-size:11px;${dim}">${isProv?'-':i+1}</td>
-      <td style="overflow:hidden"><div class="pname-cell" style="${dim}"><div class="pdot" style="background:${p.color}"></div><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span></div><div style="font-size:9px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${te} ${tn}${isProv?'（暫定）':''}</div></td>
+      <td style="overflow:hidden;text-align:left"><div class="pname-cell" style="${dim}"><div class="pdot" style="background:${p.color}"></div><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span></div><div style="font-size:9px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left">${te} ${tn}${isProv?'（暫定）':''}</div></td>
       <td style="text-align:right;font-weight:700;font-size:13px;${dim}">${e.rate}</td>
       <td style="text-align:right;font-size:11px;${dim}">${e.n}</td>
       <td style="text-align:right;font-size:11px;${dim}">${s.avgRank?s.avgRank.toFixed(3):'-'}</td>
@@ -1542,7 +1552,7 @@ function renderRatingTable(){
   };
   // 正規と暫定を1つのテーブルに統合（列幅を完全に揃える）
   const colgroup=`<colgroup>
-    <col style="width:24px"><col><col style="width:46px"><col style="width:38px"><col style="width:46px"><col style="width:76px">
+    <col style="width:24px"><col style="width:78px"><col style="width:46px"><col style="width:38px"><col style="width:46px"><col>
   </colgroup>`;
   let bodyHtml=regular.map((e,i)=>mkRow(e,i,false)).join('');
   if(prov.length){
