@@ -533,7 +533,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       ⛈️ <b>大時化（1250〜）</b> 平均−9P前後。飛ばされない立ち回りから<br>
       🙏 <b>お布施の神（〜1249）</b> 会の経済を回す尊い存在。感謝
     </div>
-    <p style="font-size:10px;color:var(--sub)">※ レート差100 ≒ 同卓相手より1局+2.5P稼ぐ実力差。同じ平均Pでも強い相手と打っている人ほどレートは高くなります。100局未満は「暫定」表示です。</p>
+    <p style="font-size:10px;color:var(--sub)">※ レート差100 ≒ 同卓相手より1局+2.5P稼ぐ実力差。同じ平均Pでも強い相手と打っている人ほどレートは高くなります。対局数が少ないうちは「暫定」表示です（累計・年間は100局、月間は50局で確定）。</p>
   </div>
   <div style="margin-top:12px">
     <button class="btn btn-s" onclick="closeModal('m-rating-help')">閉じる</button>
@@ -567,7 +567,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260825-1144';
+const APP_VERSION = 'v14-20260825-1155';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -1516,7 +1516,8 @@ function ratingTier(r){
   if(r>=1250)return['⛈️','大時化'];
   return['🙏','お布施の神'];
 }
-const RATING_MIN_GAMES=100; // これ未満は暫定表示
+// 暫定表示のライン: 累計・年間は100局、月間は50局
+function ratingMinGames(opts){return opts&&opts.month?50:100;}
 function setStatsView(v){statsView=v;saveUI();renderStatsTable();}
 function renderRatingTable(){
   const opts={};if(statsYear!=='all')opts.year=statsYear;if(statsMonth!=='all')opts.month=statsMonth;
@@ -1527,8 +1528,9 @@ function renderRatingTable(){
     .filter(e=>e.n>0&&playerById(e.pid));
   if(!entries.length){el.innerHTML='<div class="card"><div class="empty"><div class="ico">🏅</div><p>データがありません</p></div></div>';return;}
   entries.sort((a,b)=>b.rate-a.rate);
-  const regular=entries.filter(e=>e.n>=RATING_MIN_GAMES);
-  const prov=entries.filter(e=>e.n<RATING_MIN_GAMES);
+  const minG=ratingMinGames(opts);
+  const regular=entries.filter(e=>e.n>=minG);
+  const prov=entries.filter(e=>e.n<minG);
   const mkRow=(e,i,isProv)=>{
     const p=playerById(e.pid);const s=st[e.pid]||{avgRank:0,r1:0,r2:0,r3:0};
     const[te,tn]=ratingTier(e.rate);
@@ -1556,7 +1558,7 @@ function renderRatingTable(){
   </colgroup>`;
   let bodyHtml=regular.map((e,i)=>mkRow(e,i,false)).join('');
   if(prov.length){
-    bodyHtml+=`<tr><td colspan="6" style="font-size:10px;color:var(--sub);text-align:left;padding:8px 6px 4px;background:var(--sf2)">▼ 暫定（${RATING_MIN_GAMES}局未満）</td></tr>`;
+    bodyHtml+=`<tr><td colspan="6" style="font-size:10px;color:var(--sub);text-align:left;padding:8px 6px 4px;background:var(--sf2)">▼ 暫定（${minG}局未満）</td></tr>`;
     bodyHtml+=prov.map((e,i)=>mkRow(e,i,true)).join('');
   }
   el.innerHTML=`<div class="card" style="padding:10px 0;overflow:hidden">
@@ -1662,13 +1664,14 @@ function renderPlayerContent(){
   let ratingHtml='';
   if(_rr.disp[pid]!==undefined){
     const _rate=_rr.disp[pid];const[_te,_tn]=ratingTier(_rate);
-    const _reg=Object.keys(_rr.disp).filter(q=>(_rr.N[q]||0)>=RATING_MIN_GAMES).sort((a,b)=>_rr.disp[b]-_rr.disp[a]);
+    const _minG=ratingMinGames(opts);
+    const _reg=Object.keys(_rr.disp).filter(q=>(_rr.N[q]||0)>=_minG).sort((a,b)=>_rr.disp[b]-_rr.disp[a]);
     const _pos=_reg.indexOf(String(pid));
-    const _isProv=(_rr.N[pid]||0)<RATING_MIN_GAMES;
+    const _isProv=(_rr.N[pid]||0)<_minG;
     ratingHtml=`<div style="display:flex;align-items:center;gap:8px;background:var(--sf2);border-radius:8px;padding:8px 10px;margin-bottom:8px">
       <div style="font-size:20px">${_te}</div>
       <div style="flex:1"><div style="font-size:11px;font-weight:700">${_tn}${_isProv?'（暫定）':''}</div>
-      <div style="font-size:9px;color:var(--sub)">${_isProv?`レート確定まであと${RATING_MIN_GAMES-(_rr.N[pid]||0)}局`:_pos>=0?`全体 ${_pos+1}位`:''}</div></div>
+      <div style="font-size:9px;color:var(--sub)">${_isProv?`レート確定まであと${_minG-(_rr.N[pid]||0)}局`:_pos>=0?`全体 ${_pos+1}位`:''}</div></div>
       <div style="font-size:20px;font-weight:800;color:${p.color}">${_rate}</div>
       <button onclick="document.getElementById('m-rating-help').classList.add('on')" style="background:var(--bg);border:1px solid var(--bd);border-radius:50%;width:20px;height:20px;color:var(--sub);font-size:11px;cursor:pointer;line-height:1;flex-shrink:0">?</button>
     </div>`;
