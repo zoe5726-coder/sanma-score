@@ -263,6 +263,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   </div>
   <div id="month-bar" style="display:none"></div>
   <div class="px">
+    <div class="sub-tabs" style="margin-bottom:8px">
+      <button class="stbtn on" id="stats-view-0" onclick="setStatsView(0)">📊 スコア</button>
+      <button class="stbtn" id="stats-view-1" onclick="setStatsView(1)">🏅 レーティング</button>
+    </div>
+    <div id="stats-score-view">
     <div class="card" style="padding:10px 0;overflow:hidden">
       <table class="tbl2" id="stats-table">
         <thead><tr>
@@ -279,6 +284,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <tbody id="stats-tbody"></tbody>
       </table>
     </div>
+    </div>
+    <div id="stats-rating-view" style="display:none"></div>
   </div>
 </div>
 <!-- 個人 -->
@@ -490,6 +497,43 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <button class="btn btn-s" onclick="closeModal('m-baadai')">閉じる</button>
   </div>
 </div></div>
+<!-- ══ レート説明 ══ -->
+<div class="overlay" id="m-rating-help"><div class="modal" style="max-height:80vh;overflow-y:auto">
+  <div class="mtitle">🏅 レートの仕組み</div>
+  <div style="font-size:12px;line-height:1.7;color:var(--tx)">
+    <p style="margin-bottom:10px">レートは「<b>誰に・どれだけの点差で</b>勝ったか」を重視した実力の指標です（1500が平均）。</p>
+    <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--ac)">基本ルール</div>
+    <p style="margin-bottom:8px">1局を「1対1の対戦3組」に分けて評価します。対戦ごとにお互いのレート差から「勝てる確率」を計算し、結果と比べてレートが動きます。</p>
+    <ul style="margin:0 0 10px 16px;padding:0">
+      <li><b>格上に勝つ</b> → 予想外の勝利 → <span class="pos">大きく上がる</span></li>
+      <li><b>格上に負ける</b> → 想定通り → 少ししか下がらない</li>
+      <li><b>格下に勝つ</b> → 想定通り → ほとんど上がらない</li>
+      <li><b>格下に負ける</b> → 予想外の敗北 → <span class="neg">大きく下がる</span></li>
+    </ul>
+    <p style="margin-bottom:10px">さらに<b>点差も評価</b>します。同じ1着でも、+100点差の圧勝と+5点差の辛勝では加点が違います。僅差の負けは減点が小さくなります。</p>
+    <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--ac)">計算方法</div>
+    <p style="margin-bottom:10px">毎回、対象期間の全対局を最初から計算し直します。あとから対局が追加・修正されても常に全履歴を反映した正確な値になり、「最近の成績だけ偏って反映される」こともありません。</p>
+    <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--ac)">称号と目安</div>
+    <div style="font-size:11px;line-height:1.8;background:var(--sf2);border-radius:8px;padding:8px 10px;margin-bottom:10px">
+      🐉 <b>雀神（1750〜）</b> 平均+4.5P以上を維持する伝説の域。まだ誰も到達していない<br>
+      ⚡ <b>雀聖（1700〜）</b> 強豪相手に平均+3.5P前後を稼ぎ続ける会のトップ<br>
+      🔥 <b>雀豪（1650〜）</b> 平均+1.5〜3P・トップ率34%以上。強い卓で安定して勝ち越す実力者<br>
+      💎 <b>雀傑（1600〜）</b> 平均±0〜+1.5P。強い相手と打って崩れない<br>
+      🌟 <b>強者（1550〜）</b> 平均−1〜0P。あと一押しで上位へ<br>
+      ⚔️ <b>中堅（1500〜）</b> 平均−2.5〜−1P。会の平均ライン<br>
+      🌱 <b>成長株（1450〜）</b> 平均−3P前後。伸びしろのゾーン<br>
+      🎲 <b>修行中（1400〜）</b> 平均−5P前後。大敗を減らせば戻ってくる<br>
+      🍃 <b>雌伏の時（1350〜）</b> 平均−7P前後。今は耐える時期<br>
+      🌊 <b>逆風（1300〜）</b> 平均−8P前後。ラス回避が最優先課題<br>
+      ⛈️ <b>大時化（1250〜）</b> 平均−9P前後。飛ばされない立ち回りから<br>
+      🙏 <b>お布施の神（〜1249）</b> 会の経済を回す尊い存在。感謝
+    </div>
+    <p style="font-size:10px;color:var(--sub)">※ レート差100 ≒ 同卓相手より1局+2.5P稼ぐ実力差。同じ平均Pでも強い相手と打っている人ほどレートは高くなります。100局未満は「暫定」表示です。</p>
+  </div>
+  <div style="margin-top:12px">
+    <button class="btn btn-s" onclick="closeModal('m-rating-help')">閉じる</button>
+  </div>
+</div></div>
 <div class="overlay" id="m-confirm"><div class="modal">
   <div class="mtitle" id="m-ctitle">確認</div>
   <p id="m-cmsg" style="text-align:center;color:var(--sub);font-size:13px;margin-bottom:18px;line-height:1.6"></p>
@@ -518,7 +562,7 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "878309282377",
   appId:             "1:878309282377:web:e18f0bcf9e7b0cb23ee598"
 };
-const APP_VERSION = 'v14-20260709-1447';
+const APP_VERSION = 'v14-20260820-1802';
 const FB_PATH = 'sanma/v2';
 const FB_STATE   = FB_PATH + '/state';
 const FB_ACTIVE  = FB_PATH + '/activeSession';
@@ -531,7 +575,7 @@ const PCOLORS=["#22c55e","#3b82f6","#f59e0b","#ef4444","#a855f7","#14b8a6","#f97
 
 // ══ APP STATE ══
 let A={favorites:[],activeSession:null,completedSessions:[],newPlayers:[],settings:{ret:40000,uma:[15,0,-15],adminPin:'1234',jiten:35000,kaeshi:40000,rankPts:[20,0,-20],chipRate:5,tieRule:'kamicha'}};
-let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true;
+let statsYear='all',statsMonth='all',sortCol='totalP',sortDesc=true,statsView=0;
 let homeYear='all',homeMonth='all';
 let playerYear='all',playerMonth='all',selPid=null,partnerView=0,pairView=0,pairSortCol='pts',pairSortDesc=true;
 let partnerSortCol0='totalP',partnerSortDesc0=true;
@@ -703,9 +747,10 @@ function loadUiState(){
     homeYear=st.homeYear||'all';homeMonth=st.homeMonth||'all';
     playerYear=st.playerYear||'all';playerMonth=st.playerMonth||'all';
     selPid=st.selPid??null;partnerView=st.partnerView||0;currentTab=st.currentTab||'home';
+    statsView=st.statsView||0;
   }}catch(e){}
 }
-function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab}));}
+function saveUI(){localStorage.setItem('sanma-ui',JSON.stringify({statsYear,statsMonth,homeYear,homeMonth,playerYear,playerMonth,selPid,partnerView,currentTab,statsView}));}
 // Firebase は配列を {"0":v0,"1":v1,...} のオブジェクトとして保存することがある。
 // 連続整数キーのオブジェクトを配列に変換するヘルパー。
 function _fbArr(v,fallback){
@@ -1259,7 +1304,7 @@ function allSessions(){
 // ══ STATS ══
 let _statsCache=new Map();
 function _statsCacheKey(opts){return JSON.stringify(opts)+'|'+A.completedSessions.length+'|'+(A.activeSession?.games?.length||0)+'|'+A.newPlayers.length;}
-function invalidateStatsCache(){_statsCache.clear();}
+function invalidateStatsCache(){_statsCache.clear();if(typeof _ratingCache!=='undefined')_ratingCache.clear();}
 function computeStats(opts={}){
   const key=_statsCacheKey(opts);
   if(_statsCache.has(key))return _statsCache.get(key);
@@ -1392,8 +1437,129 @@ function renderHome(){
   rEl.innerHTML=html;
 }
 
+// ══ RATING (ペアワイズ収束型・スコア加味) ══
+// 全対局を「1対1の対戦3組」に分解し、点差を勝敗の強さとして評価。
+// 複数エポックで収束させるため直近偏重なし。表示は内部レート差×10倍。
+let _ratingCache=new Map();
+function invalidateRatingCache(){_ratingCache.clear();}
+function calcRatings(opts={}){
+  const key=JSON.stringify(opts)+'|'+A.completedSessions.length+'|'+(A.activeSession?.games?.length||0)+'|'+(typeof HIST!=='undefined'?HIST.games.length:0);
+  if(_ratingCache.has(key))return _ratingCache.get(key);
+  let games=allGames();
+  if(opts.year)games=games.filter(g=>g[0].startsWith(opts.year));
+  if(opts.month)games=games.filter(g=>g[0].startsWith(`${opts.year}-${opts.month}`));
+  // 3人・点数の揃った対局のみ抽出（entries: [pid,pts,rank,tobi]）
+  const trios=[];
+  for(const g of games){
+    if(!Array.isArray(g[1])||g[1].length!==3)continue;
+    if(g[1].some(e=>typeof e[1]!=='number'||isNaN(e[1])))continue;
+    trios.push(g[1]);
+  }
+  const R={},N={};
+  trios.forEach(t=>t.forEach(e=>{if(R[e[0]]===undefined)R[e[0]]=1500;N[e[0]]=(N[e[0]]||0)+1;}));
+  const M=150; // 点差→勝ち度合いのスケール（点差72≒0.75勝相当）
+  // バッチ反復（Jacobi方式）: 各パスでレートを固定したまま全対局の (S-E) を集計し、
+  // パス終了時に平均値ベースで一括更新。対局の並び順に依存しない決定的な収束解を得る。
+  for(let pass=0;pass<200;pass++){
+    const sum={},cnt={};
+    for(const t of trios){
+      for(let i=0;i<3;i++)for(let j=0;j<3;j++){
+        if(i===j)continue;
+        const pi=t[i][0],pj=t[j][0];
+        const S=1/(1+Math.pow(10,-(t[i][1]-t[j][1])/M));
+        const E=1/(1+Math.pow(10,(R[pj]-R[pi])/400));
+        sum[pi]=(sum[pi]||0)+(S-E);
+        cnt[pi]=(cnt[pi]||0)+1;
+      }
+    }
+    let maxMove=0;
+    for(const p in R){
+      const move=300*(sum[p]||0)/(cnt[p]||1); // 減衰係数300（安定収束）
+      R[p]+=move;
+      if(Math.abs(move)>maxMove)maxMove=Math.abs(move);
+    }
+    if(maxMove<0.005)break;
+  }
+  const pids=Object.keys(R);
+  const mean=pids.length?pids.reduce((a,p)=>a+R[p],0)/pids.length:1500;
+  const disp={};pids.forEach(p=>{disp[p]=Math.round(1500+(R[p]-mean)*10);});
+  const res={disp,internal:R,N,trios};
+  _ratingCache.set(key,res);
+  return res;
+}
+// レート称号
+function ratingTier(r){
+  if(r>=1750)return['🐉','雀神'];
+  if(r>=1700)return['⚡','雀聖'];
+  if(r>=1650)return['🔥','雀豪'];
+  if(r>=1600)return['💎','雀傑'];
+  if(r>=1550)return['🌟','強者'];
+  if(r>=1500)return['⚔️','中堅'];
+  if(r>=1450)return['🌱','成長株'];
+  if(r>=1400)return['🎲','修行中'];
+  if(r>=1350)return['🍃','雌伏の時'];
+  if(r>=1300)return['🌊','逆風'];
+  if(r>=1250)return['⛈️','大時化'];
+  return['🙏','お布施の神'];
+}
+const RATING_MIN_GAMES=100; // これ未満は暫定表示
+function setStatsView(v){statsView=v;saveUI();renderStatsTable();}
+function renderRatingTable(){
+  const opts={};if(statsYear!=='all')opts.year=statsYear;if(statsMonth!=='all')opts.month=statsMonth;
+  const rr=calcRatings(opts);
+  const st=computeStats(opts);
+  const el=document.getElementById('stats-rating-view');if(!el)return;
+  const entries=Object.keys(rr.disp).map(pid=>({pid:parseInt(pid),rate:rr.disp[pid],n:rr.N[pid]||0}))
+    .filter(e=>e.n>0&&playerById(e.pid));
+  if(!entries.length){el.innerHTML='<div class="card"><div class="empty"><div class="ico">🏅</div><p>データがありません</p></div></div>';return;}
+  entries.sort((a,b)=>b.rate-a.rate);
+  const regular=entries.filter(e=>e.n>=RATING_MIN_GAMES);
+  const prov=entries.filter(e=>e.n<RATING_MIN_GAMES);
+  const mkRow=(e,i,isProv)=>{
+    const p=playerById(e.pid);const s=st[e.pid]||{avgRank:0,r1r:0,r2r:0,r3r:0};
+    const[te,tn]=ratingTier(e.rate);
+    const bar=`<div style="display:flex;height:13px;border-radius:4px;overflow:hidden;min-width:84px">
+      <div style="width:${(s.r1r*100).toFixed(1)}%;background:var(--gold)"></div>
+      <div style="width:${(s.r2r*100).toFixed(1)}%;background:var(--slv)"></div>
+      <div style="width:${(s.r3r*100).toFixed(1)}%;background:var(--brz)"></div>
+    </div><div style="font-size:8px;color:var(--sub);margin-top:1px;text-align:center">${(s.r1r*100).toFixed(0)}·${(s.r2r*100).toFixed(0)}·${(s.r3r*100).toFixed(0)}%</div>`;
+    return`<tr${isProv?' style="opacity:.55"':''}>
+      <td style="text-align:center;font-weight:700;font-size:11px">${isProv?'-':i+1}</td>
+      <td><div class="pname-cell"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div><div style="font-size:9px;color:var(--sub);white-space:nowrap">${te} ${tn}${isProv?'（暫定）':''}</div></td>
+      <td style="text-align:right;font-weight:700;font-size:14px">${e.rate}</td>
+      <td style="text-align:right;font-size:11px">${e.n}</td>
+      <td style="text-align:right;font-size:11px">${s.avgRank?s.avgRank.toFixed(3):'-'}</td>
+      <td style="padding:3px 4px">${bar}</td>
+    </tr>`;
+  };
+  let html=`<div class="card" style="padding:10px 0;overflow:hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0 12px 8px">
+      <div style="font-size:12px;font-weight:700">🏅 レーティング</div>
+      <button onclick="document.getElementById('m-rating-help').classList.add('on')" style="background:var(--sf2);border:1px solid var(--bd);border-radius:50%;width:22px;height:22px;color:var(--sub);font-size:12px;cursor:pointer;line-height:1">?</button>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="tbl2" style="min-width:340px">
+      <thead><tr>
+        <th style="width:26px">#</th><th style="text-align:left">名前</th><th style="text-align:right">レート</th><th style="text-align:right">局数</th><th style="text-align:right">平均着順</th><th style="text-align:center">着順分布</th>
+      </tr></thead>
+      <tbody>${regular.map((e,i)=>mkRow(e,i,false)).join('')}</tbody>
+    </table>`;
+  if(prov.length){
+    html+=`<div style="font-size:10px;color:var(--sub);padding:8px 12px 4px">▼ 暫定（${RATING_MIN_GAMES}局未満）</div>
+    <table class="tbl2" style="min-width:340px"><tbody>${prov.map((e,i)=>mkRow(e,i,true)).join('')}</tbody></table>`;
+  }
+  html+=`</div></div>`;
+  el.innerHTML=html;
+}
+
 // ══ STATS TABLE ══
 function renderStatsTable(){
+  document.getElementById('stats-view-0')?.classList.toggle('on',statsView===0);
+  document.getElementById('stats-view-1')?.classList.toggle('on',statsView===1);
+  const _sv=document.getElementById('stats-score-view'),_rv=document.getElementById('stats-rating-view');
+  if(_sv)_sv.style.display=statsView===0?'':'none';
+  if(_rv)_rv.style.display=statsView===1?'':'none';
+  if(statsView===1){renderRatingTable();return;}
   const opts={};if(statsYear!=='all')opts.year=statsYear;if(statsMonth!=='all')opts.month=statsMonth;
   const st=computeStats(opts);
   let rows=Object.entries(st).filter(([,s])=>s.games>0).map(([pid,s])=>{const p=playerById(parseInt(pid));return{pid:parseInt(pid),name:p.name,color:p.color,...s};});
@@ -1469,7 +1635,24 @@ function renderPlayerContent(){
   const el=document.getElementById('p-content');
   if(!s||!s.games){el.innerHTML='<div class="empty"><div class="ico">📊</div><p>この期間のデータがありません</p></div>';return;}
   const rk=s.r1+s.r2+s.r3;const pctW=n=>rk>0?(n/rk*100).toFixed(1):0;const pctD=n=>rk>0?(n/rk*100).toFixed(2):'0.00';
+  // レート＋称号＋全体順位
+  const _rr=calcRatings(opts);
+  let ratingHtml='';
+  if(_rr.disp[pid]!==undefined){
+    const _rate=_rr.disp[pid];const[_te,_tn]=ratingTier(_rate);
+    const _reg=Object.keys(_rr.disp).filter(q=>(_rr.N[q]||0)>=RATING_MIN_GAMES).sort((a,b)=>_rr.disp[b]-_rr.disp[a]);
+    const _pos=_reg.indexOf(String(pid));
+    const _isProv=(_rr.N[pid]||0)<RATING_MIN_GAMES;
+    ratingHtml=`<div style="display:flex;align-items:center;gap:8px;background:var(--sf2);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div style="font-size:20px">${_te}</div>
+      <div style="flex:1"><div style="font-size:11px;font-weight:700">${_tn}${_isProv?'（暫定）':''}</div>
+      <div style="font-size:9px;color:var(--sub)">${_isProv?`レート確定まであと${RATING_MIN_GAMES-(_rr.N[pid]||0)}局`:_pos>=0?`全体 ${_pos+1}位`:''}</div></div>
+      <div style="font-size:20px;font-weight:800;color:${p.color}">${_rate}</div>
+      <button onclick="document.getElementById('m-rating-help').classList.add('on')" style="background:var(--bg);border:1px solid var(--bd);border-radius:50%;width:20px;height:20px;color:var(--sub);font-size:11px;cursor:pointer;line-height:1;flex-shrink:0">?</button>
+    </div>`;
+  }
   el.innerHTML=`<div class="card"><div class="ctitle" style="color:${p.color}">📊 ${esc(p.name)}の成績</div>
+    ${ratingHtml}
     <div class="sgrid4">
       <div class="si"><div class="sv2" style="color:${p.color}">${s.games}</div><div class="sl2">対局数</div></div>
       <div class="si"><div class="sv2" style="color:${s.totalP>=0?'var(--ac)':'var(--red)'}">${s.totalP>=0?'+':''}${s.totalP.toFixed(0)}</div><div class="sl2">合計P</div></div>
@@ -1497,7 +1680,7 @@ function renderPlayerContent(){
   <div class="card"><div class="ctitle">📈 累計ポイント推移</div><div class="ch2"><canvas id="trend-chart"></canvas></div></div>
   <div class="card"><div class="ctitle">📅 セッション別スコア</div><div id="p-sessions"></div></div>
   <div class="card"><div class="ctitle">🤝 同卓分析</div>
-    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" id="partner-tab-0" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" id="partner-tab-1" onclick="setPartnerView(1)">同卓者別・自分の成績</button></div>
+    <div class="sub-tabs"><button class="stbtn${partnerView===0?' on':''}" id="partner-tab-0" onclick="setPartnerView(0)">同卓者別・他人の成績</button><button class="stbtn${partnerView===1?' on':''}" id="partner-tab-1" onclick="setPartnerView(1)">同卓者別・自分の成績</button><button class="stbtn${partnerView===2?' on':''}" id="partner-tab-2" onclick="setPartnerView(2)">🏅 レート収支</button></div>
     <div id="partner-content"></div>
   </div>
   <div class="card"><div class="ctitle">👥 同卓ペア別ランキング</div>
@@ -1522,6 +1705,7 @@ function setPartnerView(v){
   // サブタブのon状態を切り替え
   document.getElementById('partner-tab-0')?.classList.toggle('on',v===0);
   document.getElementById('partner-tab-1')?.classList.toggle('on',v===1);
+  document.getElementById('partner-tab-2')?.classList.toggle('on',v===2);
   // パートナーコンテンツだけ更新（全体再描画しない）
   renderPartnerContent();
   // チャートが再描画される前なのでスクロール位置を維持
@@ -1692,6 +1876,7 @@ function renderPairContent(){
 function renderPartnerContent(){
   const pid=selPid,opts={};if(playerYear!=='all')opts.year=playerYear;if(playerMonth!=='all')opts.month=playerMonth;
   const el=document.getElementById('partner-content');if(!el)return;
+  if(partnerView===2){el.innerHTML=buildRatingContrib(pid,opts);return;}
   if(partnerView===0){
     const st=computeStats({...opts,focusPlayer:pid});
     let rows=Object.entries(st).filter(([,s])=>s.games>0).map(([id,s])=>{const _p=playerById(parseInt(id));return{pid:parseInt(id),name:_p.name,color:_p.color,...s,totalP:s.totalP,chips:s.chips};});
@@ -1710,6 +1895,48 @@ function renderPartnerContent(){
     else rows.sort((a,b)=>sd?b[sc]-a[sc]:a[sc]-b[sc]);
     el.innerHTML=buildPartnerTable2(rows,true,undefined);
   }
+}
+// ══ レート収支（相手別に、期待勝率との差でレートをどれだけ押し上げ/下げているか）══
+function buildRatingContrib(pid,opts){
+  const rr=calcRatings(opts);
+  const R=rr.internal;const M=150;
+  if(R[pid]===undefined)return'<div class="empty" style="padding:16px"><p>この期間のデータがありません</p></div>';
+  const out={};
+  for(const t of rr.trios){
+    const me=t.find(e=>e[0]===pid);if(!me)continue;
+    for(const e of t){
+      if(e[0]===pid)continue;
+      const S=1/(1+Math.pow(10,-(me[1]-e[1])/M));
+      const E=1/(1+Math.pow(10,(R[e[0]]-R[pid])/400));
+      const o=out[e[0]]||(out[e[0]]={n:0,w:0,l:0,se:0});
+      o.n++;
+      if(me[2]<e[2])o.w++;else if(me[2]>e[2])o.l++;
+      o.se+=(S-E);
+    }
+  }
+  let rows=Object.entries(out).map(([opp,o])=>({opp:parseInt(opp),...o,contrib:o.se*10}))
+    .filter(r=>playerById(r.opp)&&r.n>=10);
+  if(!rows.length)return'<div class="empty" style="padding:16px"><p>対戦データが不足しています（10局以上の相手のみ表示）</p></div>';
+  rows.sort((a,b)=>b.contrib-a.contrib);
+  const body=rows.map(r=>{
+    const p=playerById(r.opp);
+    const wl=r.w+r.l;
+    const E=1/(1+Math.pow(10,(R[r.opp]-R[pid])/400));
+    return`<tr>
+      <td><div class="pname-cell"><div class="pdot" style="background:${p.color}"></div>${esc(p.name)}</div></td>
+      <td style="text-align:right">${r.n}</td>
+      <td style="text-align:right">${wl>0?(r.w/wl*100).toFixed(1):'-'}%</td>
+      <td style="text-align:right;color:var(--sub)">${(E*100).toFixed(1)}%</td>
+      <td style="text-align:right;font-weight:700" class="${r.contrib>=0?'pos':'neg'}">${r.contrib>=0?'+':''}${r.contrib.toFixed(1)}</td>
+    </tr>`;
+  }).join('');
+  return`<div style="font-size:10px;color:var(--sub);padding:4px 2px 8px;line-height:1.5">
+    その相手との対戦がレートを押し上げているか（＋）、下げているか（−）。<br>期待勝率（レート差から本来勝てるはずの確率）を上回ればプラス収支。
+  </div>
+  <div style="overflow-x:auto"><table class="tbl2" style="min-width:300px">
+    <thead><tr><th style="text-align:left">相手</th><th style="text-align:right">対戦</th><th style="text-align:right">実勝率</th><th style="text-align:right">期待勝率</th><th style="text-align:right">収支</th></tr></thead>
+    <tbody>${body}</tbody>
+  </table></div>`;
 }
 
 // ══ SESSION STATS / SCORE TABLE ══
